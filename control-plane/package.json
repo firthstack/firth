@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "live:neon": "tsx scripts/live-neon-check.ts"
   },
   "dependencies": {
     "@insforge/sdk": "latest",
