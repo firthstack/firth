@@ -52,3 +52,27 @@ describe('TigrisAdapter provision/destroy', () => {
     expect(await adapter.createBranch({ kind: 's3', providerRef: {} }, 'b')).toBeNull()
   })
 })
+
+describe('TigrisAdapter.mintCredentials', () => {
+  test('creates a bucket-scoped key via the IAM endpoint and returns the S3 bundle', async () => {
+    const calls: any[] = []
+    const s3: any = async () => ({ status: 200, json: async () => ({}), text: async () => '' })
+    const iam: any = async (url: string, init: any) => {
+      calls.push({ url, init })
+      return { status: 200, json: async () => ({ access_key_id: 'tid_new', secret_access_key: 'tsec_new' }), text: async () => '' }
+    }
+    const adapter = new TigrisAdapter(s3, iam)
+    const handle = { kind: 's3' as const, providerRef: { bucket: 'firth-x-abc', endpoint: 'https://t3.storage.dev', region: 'auto' } }
+    const bundle = await adapter.mintCredentials(handle)
+    expect(bundle).toEqual({
+      AWS_ACCESS_KEY_ID: 'tid_new',
+      AWS_SECRET_ACCESS_KEY: 'tsec_new',
+      AWS_ENDPOINT_URL_S3: 'https://t3.storage.dev',
+      BUCKET_NAME: 'firth-x-abc',
+      AWS_REGION: 'auto',
+    })
+    // the IAM request references the bucket in its scoped policy
+    expect(calls[0].url).toContain('https://iam.storage.dev')
+    expect(JSON.stringify(calls[0].init.body ?? '')).toContain('firth-x-abc')
+  })
+})

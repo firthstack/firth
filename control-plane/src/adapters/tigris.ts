@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import type { ResourceHandle } from './types.js'
+import type { ProviderAdapter, ResourceHandle, SecretBundle, UsageSnapshot } from './types.js'
 import type { SignedHttp } from './signed-http.js'
 
 const S3_ENDPOINT = 'https://t3.storage.dev'
@@ -14,7 +14,7 @@ export function mkBucketName(projectName: string, rand: string): string {
   return `firth-${slug}-${rand}`
 }
 
-export class TigrisAdapter {
+export class TigrisAdapter implements ProviderAdapter {
   readonly kind = 's3' as const
   readonly branchModel = 'shared' as const
   readonly s3Endpoint: string
@@ -42,5 +42,37 @@ export class TigrisAdapter {
     if (res.status < 200 || res.status >= 300) throw new Error(`tigris DELETE /${ref.bucket} failed: ${res.status}`)
   }
 
-  async createBranch(): Promise<string | null> { return null }
+  async createBranch(_handle: ResourceHandle, _name: string, _parentRef?: string): Promise<string | null> { return null }
+
+  async mintCredentials(handle: ResourceHandle): Promise<SecretBundle> {
+    const ref = handle.providerRef as TigrisRef
+    // [VERIFY-LIVE] Create a bucket-scoped access key via Tigris IAM. Confirm the exact
+    // action/payload + response field names against the live API and adjust here only.
+    const policy = {
+      Version: '2012-10-17',
+      Statement: [
+        { Effect: 'Allow', Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'], Resource: [`arn:aws:s3:::${ref.bucket}/*`] },
+        { Effect: 'Allow', Action: ['s3:ListBucket'], Resource: [`arn:aws:s3:::${ref.bucket}`] },
+      ],
+    }
+    const res = await this.iam(`${this.iamEndpoint}/v1/access-keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: `firth-${ref.bucket}`, policy }),
+    })
+    if (res.status < 200 || res.status >= 300) throw new Error(`tigris create access-key failed: ${res.status}`)
+    const data = await res.json()
+    const id = data.access_key_id ?? data.AccessKeyId
+    const secret = data.secret_access_key ?? data.SecretAccessKey
+    if (!id || !secret) throw new Error('tigris access-key response missing credentials')
+    return {
+      AWS_ACCESS_KEY_ID: id,
+      AWS_SECRET_ACCESS_KEY: secret,
+      AWS_ENDPOINT_URL_S3: ref.endpoint,
+      BUCKET_NAME: ref.bucket,
+      AWS_REGION: ref.region,
+    }
+  }
+
+  async readUsage(): Promise<UsageSnapshot> { return {} }
 }
