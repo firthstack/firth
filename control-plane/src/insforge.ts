@@ -9,6 +9,22 @@ import type { DataClient } from './db/types.js'
 export type AuthApi = { getCurrentUser(): Promise<{ id: string } | null> }
 
 /**
+ * Verify a caller-supplied bearer token by asking the InsForge backend
+ * who it belongs to. Uses a per-call client seeded with `accessToken` so
+ * the request is authorised as that user, not as the admin key.
+ *
+ * Returns `{ id }` on success, `null` when the token is valid but carries
+ * no user (shouldn't happen in practice), and throws on network / SDK errors
+ * so a transient failure is never silently misread as "no user".
+ */
+export async function verifyToken(cfg: FirthConfig, token: string): Promise<{ id: string } | null> {
+  const c = createClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey, accessToken: token })
+  const { data, error } = await c.auth.getCurrentUser()
+  if (error) throw error // don't let a network/SDK failure read as "no user"
+  return data?.user ? { id: data.user.id } : null
+}
+
+/**
  * Build a privileged client using the project admin API key.
  * Use for trusted server-side operations and token verification.
  * Never expose the returned client or its underlying key to untrusted callers.
