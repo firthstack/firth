@@ -5,7 +5,7 @@ import type { CliDeps } from '../index.js'
 
 export type SignIn = (baseUrl: string, anonKey: string, email: string, password: string) => Promise<{ accessToken: string }>
 
-// Default: real InsForge auth. [VERIFY] confirm signInWithPassword's accessToken field via `cli docs auth typescript`.
+// Default: real InsForge auth. signInWithPassword returns { data: { accessToken }, error } (@insforge/sdk).
 const defaultSignIn: SignIn = async (baseUrl, anonKey, email, password) => {
   const c = createClient({ baseUrl, anonKey })
   const { data, error } = await c.auth.signInWithPassword({ email, password })
