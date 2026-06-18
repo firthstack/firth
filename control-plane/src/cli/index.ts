@@ -1,5 +1,6 @@
 import { homedir } from 'node:os'
 import { login, logout } from './commands/auth.js'
+import { projectCreate, projectLink, projectList } from './commands/project.js'
 
 export type CliDeps = {
   print: (s: string) => void
@@ -27,6 +28,9 @@ export const COMMANDS: Record<string, (argv: string[], deps: CliDeps) => Promise
 
 COMMANDS['login'] = login
 COMMANDS['logout'] = logout
+COMMANDS['project create'] = projectCreate
+COMMANDS['project link'] = projectLink
+COMMANDS['project list'] = projectList
 
 export async function route(argv: string[], deps: CliDeps): Promise<number> {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
