@@ -89,13 +89,16 @@ export class ProvisioningService {
       // Rollback bookkeeping is BEST-EFFORT: every step is individually guarded so a
       // destroy or DB fault during cleanup can never replace the original error.
       // Use the `provisioned` list (not `succeeded`) so handles obtained mid-flight are also destroyed.
+      // Order is not reversed: adapters provision concurrently, so insertion order is non-deterministic
+      // and LIFO teardown carries no meaning here.
       for (const d of provisioned) {
         try { await d.adapter.destroy(d.handle) } catch { /* best-effort: never mask err */ }
         try { await this.db.from('resources').update({ status: 'error' }).eq('id', d.resourceId) } catch { /* best-effort */ }
       }
       // If we inserted a resource row but failed before pushing a handle, mark stragglers error.
-      // Safe to sweep by project_id: this project was just created and is exclusively owned by
-      // this saga. Revisit this assumption if provisioning ever becomes async or parallel.
+      // Safe to sweep by project_id: this project was just created and is exclusively owned by this
+      // saga — the concurrent adapters all run inside this single saga invocation, so no other actor
+      // holds this project_id.
       try {
         const pending = await this.db.from('resources').select().eq('project_id', project.id).eq('status', 'provisioning')
         for (const r of (pending.data ?? [])) {
