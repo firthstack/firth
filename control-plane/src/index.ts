@@ -1,6 +1,7 @@
 import { loadConfig } from './config.js'
 import { userClient, verifyToken } from './insforge.js'
 import { buildServer } from './server.js'
+import { buildAdapters } from './adapters/factory.js'
 
 export const version = '0.0.0'
 
@@ -10,6 +11,7 @@ export async function main() {
     cfg,
     verifyToken: (token) => verifyToken(cfg, token),
     dataForToken: (token) => userClient(cfg, token).database,
+    adaptersForToken: () => buildAdapters(cfg),
   })
   const port = Number(process.env.PORT ?? 8080)
   await app.listen({ port, host: '0.0.0.0' })

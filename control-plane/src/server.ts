@@ -3,13 +3,15 @@ import type { FirthConfig } from './config.js'
 import { resolveUid, UnauthorizedError } from './auth.js'
 import type { DataClient } from './db/types.js'
 import { ProjectsRepo, SecretsRepo } from './db/repos.js'
-import { ProjectService } from './services/projects.js'
 import { decryptSecret } from './crypto/secrets.js'
+import { ProvisioningService } from './services/provisioning.js'
+import type { ProviderAdapter } from './adapters/types.js'
 
 export type ServerDeps = {
   cfg: FirthConfig
   verifyToken: (token: string) => Promise<{ id: string } | null>
   dataForToken: (token: string) => DataClient
+  adaptersForToken?: (token: string) => ProviderAdapter[]
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -23,14 +25,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   async function auth(req: any) {
     const { uid, token } = await resolveUid(req.headers.authorization, deps.verifyToken)
-    return { uid, db: deps.dataForToken(token) }
+    return { uid, token, db: deps.dataForToken(token) }
   }
 
   app.post('/projects', async (req, reply) => {
-    const { uid, db } = await auth(req)
+    const { uid, token, db } = await auth(req)
     const name = (req.body as any)?.name
     if (!name) return reply.code(400).send({ error: 'name is required' })
-    const out = await new ProjectService(db).createProject(uid, name)
+    const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
+    const out = await new ProvisioningService(db, deps.cfg, adapters).provisionProject(uid, name)
     return reply.code(201).send(out)
   })
 

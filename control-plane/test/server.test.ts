@@ -11,12 +11,22 @@ const cfg = { keks, currentKek: current, insforge: { baseUrl: 'x', anonKey: 'a',
 //   eq(col, null)  → matches nothing (mirrors col=eq.null, not IS NULL)
 //   is(col, null)  → matches rows where col is null/undefined
 function fakeData() {
-  const tables: Record<string, any[]> = { projects: [], branches: [], secrets: [] }
+  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [] }
   return { tables, from(t: string) {
     const filters: Array<(r: any) => boolean> = []
+    let mode: 'insert' | 'select' | 'update' = 'select'
+    let insertedRow: any
+    let updatePayload: any
     const api: any = {
-      insert(v: any) { const row = { id: `${t}-${tables[t].length}`, ...v }; tables[t].push(row); api._row = row; return api },
-      select() { api._sel = true; return api },
+      insert(v: any) {
+        mode = 'insert'
+        const row = { id: `${t}-${tables[t].length}`, ...v }
+        tables[t].push(row)
+        insertedRow = row
+        return api
+      },
+      update(v: any) { mode = 'update'; updatePayload = v; return api },
+      select() { return api },
       eq(c: string, val: any) {
         filters.push(val === null ? () => false : (r: any) => r[c] === val)
         return api
@@ -26,20 +36,33 @@ function fakeData() {
         return api
       },
       async then(res: any) {
-        if (api._sel && !api._row) return res({ data: tables[t].filter((r) => filters.every((fn) => fn(r))), error: null })
-        return res({ data: [api._row], error: null })
+        if (mode === 'update') {
+          for (const row of tables[t]) if (filters.every((fn) => fn(row))) Object.assign(row, updatePayload)
+          return res({ data: [], error: null })
+        }
+        if (mode === 'insert') return res({ data: [insertedRow], error: null })
+        return res({ data: tables[t].filter((r) => filters.every((fn) => fn(r))), error: null })
       },
     }
     return api
   } }
 }
 
-test('POST /projects then GET /projects round-trips for the owner', async () => {
-  const db = fakeData()
-  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
-  const created = await app.inject({ method: 'POST', url: '/projects',
-    headers: { authorization: 'Bearer good' }, payload: { name: 'demo' } })
+test('POST /projects provisions via the saga and lists the project', async () => {
+  const db = fakeData() // ensure fakeData supports insert/select/eq/update (mirror provisioning.test.ts fake)
+  const fakeNeon = {
+    kind: 'neon', branchModel: 'native',
+    async provision(name: string) { return { kind: 'neon', providerRef: { neonProjectId: `np-${name}`, defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' } } },
+    async destroy() {}, async createBranch() { return 'br-x' },
+    async mintCredentials() { return { DATABASE_URL: 'postgresql://conn' } }, async readUsage() { return {} },
+  }
+  const app = buildServer({
+    cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any,
+    adaptersForToken: () => [fakeNeon as any],
+  })
+  const created = await app.inject({ method: 'POST', url: '/projects', headers: { authorization: 'Bearer good' }, payload: { name: 'demo' } })
   expect(created.statusCode).toBe(201)
+  expect(created.json().resources).toEqual([{ kind: 'neon', status: 'active' }])
   const list = await app.inject({ method: 'GET', url: '/projects', headers: { authorization: 'Bearer good' } })
   expect(list.json().projects).toHaveLength(1)
 })
