@@ -8,6 +8,7 @@ export type SecretRow = NewSecretRow & { id: string }
 // The subset of @insforge/sdk's `database` query builder we depend on.
 export interface QueryBuilder {
   insert(values: object | object[]): QueryBuilder
+  update(values: object): QueryBuilder
   select(): QueryBuilder
   eq(column: string, value: unknown): QueryBuilder
   is(column: string, value: unknown): QueryBuilder
