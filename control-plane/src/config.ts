@@ -4,6 +4,7 @@ export type FirthConfig = {
   keks: Map<string, Buffer>
   currentKek: string
   insforge: { baseUrl: string; anonKey: string; adminKey: string }
+  neonApiKey?: string
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
@@ -22,5 +23,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): FirthConfig {
       anonKey: required(env, 'INSFORGE_ANON_KEY'),
       adminKey: required(env, 'INSFORGE_ADMIN_KEY'),
     },
+    neonApiKey: env.NEON_API_KEY,
   }
 }

@@ -20,3 +20,9 @@ test('throws when a required InsForge var is missing', () => {
   const { INSFORGE_ADMIN_KEY, ...rest } = base
   expect(() => loadConfig(rest)).toThrow(/INSFORGE_ADMIN_KEY/)
 })
+
+test('exposes neonApiKey when set, undefined when absent', () => {
+  const cfg = loadConfig({ ...base, NEON_API_KEY: 'neon_abc' })
+  expect(cfg.neonApiKey).toBe('neon_abc')
+  expect(loadConfig(base).neonApiKey).toBeUndefined()
+})
