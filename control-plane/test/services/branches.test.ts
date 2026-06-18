@@ -82,4 +82,13 @@ describe('BranchService.createBranch', () => {
     await expect(new BranchService(db as any, cfg, [neonAdapter()]).createBranch('o', 'p', 'feat'))
       .rejects.toThrow(/neon resource/i)
   })
+
+  test('refuses to fork off a non-active parent branch', async () => {
+    const db = fakeDb({
+      resources: [{ id: 'r1', owner: 'o', project_id: 'p', kind: 'neon', provider_ref: { neonProjectId: 'np', defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' }, status: 'active' }],
+      branches: [{ id: 'b-bad', owner: 'o', project_id: 'p', name: 'broken', parent_branch_id: null, is_default: false, neon_branch_ref: 'br-stale', status: 'error' }],
+    })
+    await expect(new BranchService(db as any, cfg, [neonAdapter()]).createBranch('o', 'p', 'feat', 'broken'))
+      .rejects.toThrow(/not active/i)
+  })
 })

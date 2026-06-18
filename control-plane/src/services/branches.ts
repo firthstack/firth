@@ -19,6 +19,9 @@ export class BranchService {
     const branches = new BranchesRepo(this.db)
     const parent = await branches.findByName(owner, projectId, fromName)
     if (!parent || !parent.neon_branch_ref) throw new Error(`parent branch "${fromName}" not found or has no neon branch`)
+    // Don't fork off a parent that isn't healthy — an 'error'/'creating' parent may carry a
+    // stale neon_branch_ref pointing at a Neon branch a prior rollback already deleted.
+    if (parent.status !== 'active') throw new Error(`parent branch "${fromName}" is not active (status: ${parent.status})`)
 
     const handle: ResourceHandle = { kind: 'neon', providerRef: resource.provider_ref }
     const row = await branches.create({
