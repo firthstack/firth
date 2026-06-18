@@ -80,3 +80,44 @@ describe('NeonAdapter.destroy', () => {
     expect(calls[0].url).toMatch(/\/projects\/proj-1$/)
   })
 })
+
+describe('NeonAdapter.createBranch', () => {
+  test('POSTs a branch with parent_id and returns the new branch id', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/projects/proj-1/branches'),
+        body: { branch: { id: 'br-new' }, operations: [] } },
+    ])
+    const adapter = new NeonAdapter('k', http, { sleep: noSleep })
+    const handle = { kind: 'neon' as const, providerRef: { neonProjectId: 'proj-1', defaultBranchId: 'br-main', dbName: 'd', roleName: 'r' } }
+    const id = await adapter.createBranch(handle, 'feature-x', 'br-main')
+    expect(id).toBe('br-new')
+    expect(JSON.parse(calls[0].init.body)).toMatchObject({ branch: { name: 'feature-x', parent_id: 'br-main' } })
+  })
+})
+
+describe('NeonAdapter.mintCredentials', () => {
+  test('GETs the connection_uri for the branch/db/role and returns DATABASE_URL', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'GET' && u.includes('/connection_uri'),
+        body: { uri: 'postgresql://neondb_owner:pw@host/neondb?sslmode=require' } },
+    ])
+    const adapter = new NeonAdapter('k', http, { sleep: noSleep })
+    const handle = { kind: 'neon' as const, providerRef: { neonProjectId: 'proj-1', defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' } }
+    const bundle = await adapter.mintCredentials(handle, 'br-main')
+    expect(bundle).toEqual({ DATABASE_URL: 'postgresql://neondb_owner:pw@host/neondb?sslmode=require' })
+    const url = calls[0].url
+    expect(url).toContain('branch_id=br-main')
+    expect(url).toContain('database_name=neondb')
+    expect(url).toContain('role_name=neondb_owner')
+  })
+
+  test('defaults to the default branch when no branchRef is given', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'GET', body: { uri: 'postgresql://x' } },
+    ])
+    const adapter = new NeonAdapter('k', http, { sleep: noSleep })
+    await adapter.mintCredentials(
+      { kind: 'neon', providerRef: { neonProjectId: 'proj-1', defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' } })
+    expect(calls[0].url).toContain('branch_id=br-main')
+  })
+})

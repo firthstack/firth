@@ -1,4 +1,4 @@
-import type { HttpClient, ResourceHandle } from './types.js'
+import type { HttpClient, ProviderAdapter, ResourceHandle, SecretBundle, UsageSnapshot } from './types.js'
 
 const NEON_BASE = 'https://console.neon.tech/api/v2'
 const TERMINAL = ['finished', 'skipped', 'cancelled']
@@ -11,7 +11,7 @@ export type NeonOptions = {
   pollAttempts?: number
 }
 
-export class NeonAdapter {
+export class NeonAdapter implements ProviderAdapter {
   readonly kind = 'neon' as const
   readonly branchModel = 'native' as const
   private baseUrl: string
@@ -79,5 +79,32 @@ export class NeonAdapter {
   async destroy(handle: ResourceHandle): Promise<void> {
     const ref = handle.providerRef as NeonRef
     await this.call('DELETE', `/projects/${ref.neonProjectId}`)
+  }
+
+  async createBranch(handle: ResourceHandle, name: string, parentRef?: string): Promise<string | null> {
+    const ref = handle.providerRef as NeonRef
+    const parent_id = parentRef ?? ref.defaultBranchId
+    const data = await this.call('POST', `/projects/${ref.neonProjectId}/branches`, {
+      branch: { name, parent_id },
+      endpoints: [{ type: 'read_write' }],
+    })
+    await this.awaitOps(ref.neonProjectId, data.operations)
+    return data.branch.id as string
+  }
+
+  async mintCredentials(handle: ResourceHandle, branchRef?: string): Promise<SecretBundle> {
+    const ref = handle.providerRef as NeonRef
+    const branchId = branchRef ?? ref.defaultBranchId
+    const qs = new URLSearchParams({
+      branch_id: branchId,
+      database_name: ref.dbName,
+      role_name: ref.roleName,
+    }).toString()
+    const data = await this.call('GET', `/projects/${ref.neonProjectId}/connection_uri?${qs}`)
+    return { DATABASE_URL: data.uri }
+  }
+
+  async readUsage(_handle: ResourceHandle): Promise<UsageSnapshot> {
+    return {} // metering is out of scope for v1 (ARCHITECTURE.md §2)
   }
 }
