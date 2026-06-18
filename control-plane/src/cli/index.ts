@@ -1,4 +1,5 @@
 import { homedir } from 'node:os'
+import { login, logout } from './commands/auth.js'
 
 export type CliDeps = {
   print: (s: string) => void
@@ -23,6 +24,9 @@ Commands:
 
 // Command handlers registered by later tasks. Each: (argv, deps) => Promise<number>.
 export const COMMANDS: Record<string, (argv: string[], deps: CliDeps) => Promise<number>> = {}
+
+COMMANDS['login'] = login
+COMMANDS['logout'] = logout
 
 export async function route(argv: string[], deps: CliDeps): Promise<number> {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
