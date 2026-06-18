@@ -15,6 +15,10 @@ async function main() {
     console.log('provisioned:', handle.providerRef)
     const branch = await adapter.createBranch(handle, 'feature-check')
     console.log('created branch:', branch)
+    if (branch) {
+      await adapter.deleteBranch(handle, branch)
+      console.log('deleted branch:', branch)
+    }
     const creds = await adapter.mintCredentials(handle)
     console.log('minted DATABASE_URL present:', Boolean(creds.DATABASE_URL), '(value not printed)')
   } finally {
