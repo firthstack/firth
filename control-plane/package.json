@@ -7,7 +7,9 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "dev": "tsx src/index.ts",
-    "live:neon": "tsx scripts/live-neon-check.ts"
+    "live:neon": "tsx scripts/live-neon-check.ts",
+    "live:fly": "tsx scripts/live-fly-check.ts",
+    "live:tigris": "tsx scripts/live-tigris-check.ts"
   },
   "dependencies": {
     "@insforge/sdk": "latest",
