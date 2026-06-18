@@ -7,27 +7,39 @@ import type { ProviderAdapter, ResourceHandle } from '../../src/adapters/types.j
 const { keks, current } = loadKeks({ FIRTH_KEK_CURRENT: 'V1', FIRTH_KEK_V1: randomBytes(32).toString('base64') })
 const cfg = { keks, currentKek: current, insforge: { baseUrl: 'x', anonKey: 'a', adminKey: 'ik' } } as any
 
-// In-memory DataClient supporting insert/select/eq/update.
+// In-memory DataClient supporting insert/select/eq/is/update.
+// eq(col, null) matches no rows; is(col, null) matches rows where col is null.
 function fakeDb() {
   const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [] }
   return {
     tables,
     from(t: string) {
-      const filters: Array<[string, any]> = []
+      const filters: Array<{ kind: 'eq' | 'is'; col: string; val: any }> = []
       let mode: 'insert' | 'select' | 'update' = 'select'
       let payload: any
       const api: any = {
         insert(v: any) { mode = 'insert'; payload = { id: `${t}-${tables[t].length}`, ...v }; tables[t].push(payload); return api },
         update(v: any) { mode = 'update'; payload = v; return api },
         select() { return api },
-        eq(c: string, val: any) { filters.push([c, val]); return api },
+        eq(c: string, val: any) { filters.push({ kind: 'eq', col: c, val }); return api },
+        is(c: string, val: any) { filters.push({ kind: 'is', col: c, val }); return api },
         async then(res: any) {
+          const matchRow = (row: any) => filters.every(({ kind, col, val }) => {
+            if (kind === 'eq') {
+              // eq(col, null) → never matches (PostgREST semantics)
+              if (val === null) return false
+              return row[col] === val
+            } else {
+              // is(col, null) → matches rows where col is null/undefined
+              return row[col] == null
+            }
+          })
           if (mode === 'update') {
-            for (const row of tables[t]) if (filters.every(([c, v]) => row[c] === v)) Object.assign(row, payload)
+            for (const row of tables[t]) if (matchRow(row)) Object.assign(row, payload)
             return res({ data: [], error: null })
           }
           if (mode === 'insert') return res({ data: [payload], error: null })
-          const rows = tables[t].filter((r) => filters.every(([c, v]) => r[c] === v))
+          const rows = tables[t].filter(matchRow)
           return res({ data: rows, error: null })
         },
       }
@@ -49,6 +61,37 @@ function fakeNeon(overrides: Partial<ProviderAdapter> = {}): ProviderAdapter & {
     async mintCredentials() { return { DATABASE_URL: 'postgresql://secret-conn' } },
     async readUsage() { return {} },
     ...overrides,
+  } as any
+}
+
+// Generic multi-adapter fake builder matching the spec sketch
+function mk(kind: 'neon' | 's3' | 'fly', opts: { fail?: boolean } = {}): ProviderAdapter & { destroyed: string[] } {
+  const destroyed: string[] = []
+  const branchModel = kind === 'neon' ? 'native' : kind === 's3' ? 'shared' : 'redeploy'
+  return {
+    destroyed,
+    kind,
+    branchModel,
+    async provision(name: string): Promise<ResourceHandle> {
+      if (opts.fail) throw new Error(`${kind} provision failed`)
+      return {
+        kind: kind as any,
+        providerRef: {
+          neonProjectId: `${kind}-${name}`, defaultBranchId: 'br-main',
+          dbName: 'd', roleName: 'r',
+          bucket: `b-${name}`, flyApp: `a-${name}`,
+          endpoint: 'e', region: 'auto', orgSlug: 'o',
+        },
+      }
+    },
+    async destroy() { destroyed.push(kind) },
+    async createBranch() { return kind === 'neon' ? 'br-x' : null },
+    async mintCredentials() {
+      if (kind === 'neon') return { DATABASE_URL: 'postgresql://c' }
+      if (kind === 's3') return { AWS_ACCESS_KEY_ID: 'k', AWS_SECRET_ACCESS_KEY: 's' }
+      return {}
+    },
+    async readUsage() { return {} },
   } as any
 }
 
@@ -129,5 +172,60 @@ describe('ProvisioningService.provisionProject', () => {
     // Must reject with the ORIGINAL error, not 'db down during rollback'.
     await expect(svc.provisionProject('owner-1', 'demo')).rejects.toThrow(/mint failed/)
     expect((neon as any).destroyed).toEqual(['np-demo']) // destroy still attempted
+  })
+
+  test('parallel happy path: [neon, s3, fly] → 3 resources active; DATABASE_URL branch-scoped; AWS_* project-scoped; no fly secret', async () => {
+    const db = fakeDb()
+    const neonA = mk('neon')
+    const s3A = mk('s3')
+    const flyA = mk('fly')
+    const svc = new ProvisioningService(db as any, cfg, [neonA as any, s3A as any, flyA as any])
+    const out = await svc.provisionProject('owner-1', 'multi')
+
+    // All 3 resource rows active
+    expect(out.resources.map(r => r.kind).sort()).toEqual(['fly', 'neon', 's3'])
+    expect(out.resources.every(r => r.status === 'active')).toBe(true)
+    for (const row of db.tables.resources) {
+      expect(row.status).toBe('active')
+    }
+
+    // Neon DATABASE_URL is branch-scoped (branch_id = main branch id)
+    const dbUrlSecret = db.tables.secrets.find((s: any) => s.name === 'DATABASE_URL')
+    expect(dbUrlSecret).toBeDefined()
+    expect(dbUrlSecret.branch_id).toBe(out.defaultBranch.id)
+
+    // AWS_* secrets are project-scoped (branch_id = null)
+    const awsKeySecret = db.tables.secrets.find((s: any) => s.name === 'AWS_ACCESS_KEY_ID')
+    const awsSecretSecret = db.tables.secrets.find((s: any) => s.name === 'AWS_SECRET_ACCESS_KEY')
+    expect(awsKeySecret).toBeDefined()
+    expect(awsKeySecret.branch_id).toBeNull()
+    expect(awsSecretSecret).toBeDefined()
+    expect(awsSecretSecret.branch_id).toBeNull()
+
+    // No secret stored for fly (mintCredentials returns {})
+    const flySecrets = db.tables.secrets.filter((s: any) => s.owner === 'owner-1' && !['DATABASE_URL', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'].includes(s.name))
+    expect(flySecrets.length).toBe(0)
+    // Total secrets: 1 (DATABASE_URL) + 2 (AWS_*) = 3
+    expect(db.tables.secrets.length).toBe(3)
+
+    // Neon branch_ref set on main branch
+    expect(db.tables.branches[0].neon_branch_ref).toBe('br-main')
+  })
+
+  test('multi-rollback: when one adapter provision rejects, all successfully provisioned adapters get destroyed and original error propagates', async () => {
+    const db = fakeDb()
+    const neonA = mk('neon')
+    const s3A = mk('s3', { fail: true })
+    const flyA = mk('fly')
+    const svc = new ProvisioningService(db as any, cfg, [neonA as any, s3A as any, flyA as any])
+
+    await expect(svc.provisionProject('owner-1', 'multi')).rejects.toThrow(/s3 provision failed/)
+
+    // Both neon and fly (which succeeded before s3 failed) must have been destroyed
+    expect((neonA as any).destroyed).toContain('neon')
+    expect((flyA as any).destroyed).toContain('fly')
+
+    // s3 never completed provision so it gets no destroy call
+    expect((s3A as any).destroyed).not.toContain('s3')
   })
 })

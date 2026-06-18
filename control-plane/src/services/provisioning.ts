@@ -11,14 +11,25 @@ export type ProvisionResult = {
   resources: Array<{ kind: string; status: string }>
 }
 
+// Tracks a provisioned handle that must be destroyed on rollback.
+type RollbackEntry = { adapter: ProviderAdapter; handle: ResourceHandle; resourceId: string }
+
 export class ProvisioningService {
   constructor(private db: DataClient, private cfg: FirthConfig, private adapters: ProviderAdapter[]) {}
 
   async provisionProject(owner: string, name: string): Promise<ProvisionResult> {
     const { project, defaultBranch } = await new ProjectService(this.db).createProject(owner, name)
-    const done: Array<{ adapter: ProviderAdapter; handle: ResourceHandle; resourceId: string }> = []
-    try {
-      for (const adapter of this.adapters) {
+
+    // Entries registered as soon as provision() returns, even if the rest of the routine fails.
+    // This ensures the destroy() cleanup covers handles that were obtained but whose post-processing failed.
+    const provisioned: RollbackEntry[] = []
+
+    // Provision all adapters concurrently. Each routine is self-contained: it inserts its
+    // resource row, calls provision, post-processes (credential minting + secret storage),
+    // and returns its handle for rollback use. Errors are collected via allSettled so that
+    // one adapter's failure does not cancel concurrent work mid-flight.
+    const results = await Promise.allSettled(
+      this.adapters.map(async (adapter): Promise<RollbackEntry> => {
         const ins = await this.db.from('resources')
           .insert({ project_id: project.id, owner, kind: adapter.kind, status: 'provisioning', provider_ref: {} })
           .select()
@@ -26,12 +37,16 @@ export class ProvisioningService {
         const resourceId = (firstOrThrow(ins.data, 'resource') as { id: string }).id
 
         const handle = await adapter.provision(name)
-        done.push({ adapter, handle, resourceId })
+
+        // Register for rollback as soon as we have a live handle — before any post-processing
+        // that could fail. Any subsequent error in this routine will cause rollback to call destroy().
+        provisioned.push({ adapter, handle, resourceId })
 
         const upd = await this.db.from('resources')
           .update({ provider_ref: handle.providerRef, status: 'active' }).eq('id', resourceId)
         if (upd.error) throw upd.error
 
+        // Per-kind post-provision: neon is branch-scoped; all others are project-scoped.
         if (adapter.kind === 'neon') {
           const branchRef = (handle.providerRef as { defaultBranchId: string }).defaultBranchId
           const bu = await this.db.from('branches').update({ neon_branch_ref: branchRef }).eq('id', defaultBranch.id)
@@ -45,16 +60,36 @@ export class ProvisioningService {
             }).select()
             if (sec.error) throw sec.error
           }
+        } else {
+          // S3 buckets and Fly apps are project-scoped (branch_id null): the bucket is shared
+          // across branches, and Fly mints no credentials at all.
+          const bundle = await adapter.mintCredentials(handle)
+          for (const [key, value] of Object.entries(bundle)) {
+            const enc = encryptSecret(value, this.cfg.keks, this.cfg.currentKek)
+            const sec = await this.db.from('secrets').insert({
+              project_id: project.id, owner, branch_id: null, name: key,
+              ciphertext: enc.ciphertext, nonce: enc.nonce, kek_version: enc.kekVersion,
+            }).select()
+            if (sec.error) throw sec.error
+          }
         }
-      }
-      return {
-        project, defaultBranch,
-        resources: done.map((d) => ({ kind: d.adapter.kind, status: 'active' })),
-      }
-    } catch (err) {
+
+        return { adapter, handle, resourceId }
+      }),
+    )
+
+    const succeeded: RollbackEntry[] = []
+    let firstRejection: unknown | undefined
+    for (const r of results) {
+      if (r.status === 'fulfilled') succeeded.push(r.value)
+      else if (firstRejection === undefined) firstRejection = r.reason
+    }
+
+    if (firstRejection !== undefined) {
       // Rollback bookkeeping is BEST-EFFORT: every step is individually guarded so a
       // destroy or DB fault during cleanup can never replace the original error.
-      for (const d of [...done].reverse()) {
+      // Use the `provisioned` list (not `succeeded`) so handles obtained mid-flight are also destroyed.
+      for (const d of provisioned) {
         try { await d.adapter.destroy(d.handle) } catch { /* best-effort: never mask err */ }
         try { await this.db.from('resources').update({ status: 'error' }).eq('id', d.resourceId) } catch { /* best-effort */ }
       }
@@ -67,7 +102,12 @@ export class ProvisioningService {
           try { await this.db.from('resources').update({ status: 'error' }).eq('id', (r as { id: string }).id) } catch { /* best-effort */ }
         }
       } catch { /* best-effort: never mask err */ }
-      throw err
+      throw firstRejection
+    }
+
+    return {
+      project, defaultBranch,
+      resources: succeeded.map((d) => ({ kind: d.adapter.kind, status: 'active' })),
     }
   }
 }

@@ -5,6 +5,10 @@ export type FirthConfig = {
   currentKek: string
   insforge: { baseUrl: string; anonKey: string; adminKey: string }
   neonApiKey?: string
+  flyApiToken?: string
+  flyOrgSlug?: string
+  tigrisAccessKeyId?: string
+  tigrisSecretAccessKey?: string
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
@@ -24,5 +28,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): FirthConfig {
       adminKey: required(env, 'INSFORGE_ADMIN_KEY'),
     },
     neonApiKey: env.NEON_API_KEY,
+    flyApiToken: env.FLY_API_TOKEN,
+    flyOrgSlug: env.FLY_ORG_SLUG,
+    tigrisAccessKeyId: env.TIGRIS_ACCESS_KEY_ID,
+    tigrisSecretAccessKey: env.TIGRIS_SECRET_ACCESS_KEY,
   }
 }
