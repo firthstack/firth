@@ -24,7 +24,11 @@ describe('secret encryption', () => {
   test('tampered ciphertext fails authentication', () => {
     const { keks, current } = loadKeks(env)
     const enc = encryptSecret('y', keks, current)
-    const bad = { ...enc, ciphertext: Buffer.from('deadbeef').toString('base64') }
+    // Flip a byte but keep the 16-byte tag length intact, so this exercises a
+    // genuine GCM authentication failure rather than an invalid-tag-length error.
+    const raw = Buffer.from(enc.ciphertext, 'base64')
+    raw[0] ^= 0xff
+    const bad = { ...enc, ciphertext: raw.toString('base64') }
     expect(() => decryptSecret(bad, keks)).toThrow()
   })
 
