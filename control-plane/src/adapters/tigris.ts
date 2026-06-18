@@ -44,6 +44,8 @@ export class TigrisAdapter implements ProviderAdapter {
 
   async createBranch(_handle: ResourceHandle, _name: string, _parentRef?: string): Promise<string | null> { return null }
 
+  async deleteBranch(): Promise<void> { /* no per-branch resource: storage shared, compute redeploys */ }
+
   async mintCredentials(handle: ResourceHandle): Promise<SecretBundle> {
     const ref = handle.providerRef as TigrisRef
     // [VERIFY-LIVE] Create a bucket-scoped access key via Tigris IAM. Confirm the exact

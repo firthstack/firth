@@ -15,6 +15,7 @@ export interface ProviderAdapter {
   provision(projectName: string): Promise<ResourceHandle>
   destroy(handle: ResourceHandle): Promise<void>
   createBranch(handle: ResourceHandle, name: string, parentRef?: string): Promise<string | null>
+  deleteBranch(handle: ResourceHandle, branchRef: string): Promise<void>
   mintCredentials(handle: ResourceHandle, branchRef?: string): Promise<SecretBundle>
   readUsage(handle: ResourceHandle): Promise<UsageSnapshot>
 }

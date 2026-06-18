@@ -43,6 +43,7 @@ export class FlyAdapter implements ProviderAdapter {
   }
 
   async createBranch(): Promise<string | null> { return null }
+  async deleteBranch(): Promise<void> { /* no per-branch resource: storage shared, compute redeploys */ }
   async mintCredentials(): Promise<SecretBundle> { return {} }
   async readUsage(): Promise<UsageSnapshot> { return {} }
 }

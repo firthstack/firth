@@ -121,3 +121,18 @@ describe('NeonAdapter.mintCredentials', () => {
     expect(calls[0].url).toContain('branch_id=br-main')
   })
 })
+
+describe('NeonAdapter.deleteBranch', () => {
+  test('DELETEs /projects/{id}/branches/{branchRef}', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'DELETE' && u.endsWith('/projects/proj-1/branches/br-x'), body: {} },
+    ])
+    const adapter = new NeonAdapter('neon_key', http, { sleep: noSleep })
+    await adapter.deleteBranch(
+      { kind: 'neon', providerRef: { neonProjectId: 'proj-1', defaultBranchId: 'br-main', dbName: 'd', roleName: 'r' } },
+      'br-x',
+    )
+    expect(calls[0].init.method).toBe('DELETE')
+    expect(calls[0].url).toMatch(/\/projects\/proj-1\/branches\/br-x$/)
+  })
+})

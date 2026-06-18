@@ -92,6 +92,11 @@ export class NeonAdapter implements ProviderAdapter {
     return data.branch.id as string
   }
 
+  async deleteBranch(handle: ResourceHandle, branchRef: string): Promise<void> {
+    const ref = handle.providerRef as NeonRef
+    await this.call('DELETE', `/projects/${ref.neonProjectId}/branches/${branchRef}`)
+  }
+
   async mintCredentials(handle: ResourceHandle, branchRef?: string): Promise<SecretBundle> {
     const ref = handle.providerRef as NeonRef
     const branchId = branchRef ?? ref.defaultBranchId
