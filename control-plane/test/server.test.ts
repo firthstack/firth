@@ -88,6 +88,29 @@ test('GET secrets seam returns decrypted project-scoped bundle', async () => {
   expect(r.json().secrets).toEqual({ DATABASE_URL: 'postgres://conn' })
 })
 
+test('POST /projects/:id/branches creates a branch via BranchService', async () => {
+  const db = fakeData()
+  db.tables.branches.push({ id: 'b-main', owner: 'uid-1', project_id: 'p1', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' })
+  db.tables.resources.push({ id: 'r1', owner: 'uid-1', project_id: 'p1', kind: 'neon', provider_ref: { neonProjectId: 'np', defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' }, status: 'active' })
+  const neon = { kind: 'neon', branchModel: 'native',
+    async provision() { return { kind: 'neon', providerRef: {} } }, async destroy() {},
+    async createBranch() { return 'br-new' }, async deleteBranch() {},
+    async mintCredentials() { return { DATABASE_URL: 'postgresql://c' } }, async readUsage() { return {} } }
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [neon as any] })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/branches', headers: { authorization: 'Bearer good' }, payload: { name: 'feat' } })
+  expect(r.statusCode).toBe(201)
+  expect(r.json().branch.name).toBe('feat')
+
+  const list = await app.inject({ method: 'GET', url: '/projects/p1/branches', headers: { authorization: 'Bearer good' } })
+  expect(list.json().branches.map((b: any) => b.name).sort()).toEqual(['feat', 'main'])
+})
+
+test('POST /projects/:id/branches requires a name', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => fakeData() as any, adaptersForToken: () => [] })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/branches', headers: { authorization: 'Bearer good' }, payload: {} })
+  expect(r.statusCode).toBe(400)
+})
+
 test('GET secrets branch-scoped returns only branch secrets, not project-scoped ones', async () => {
   const db = fakeData()
   const encProj = encryptSecret('project-value', keks, current)

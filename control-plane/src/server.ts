@@ -2,9 +2,10 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import type { FirthConfig } from './config.js'
 import { resolveUid, UnauthorizedError } from './auth.js'
 import type { DataClient } from './db/types.js'
-import { ProjectsRepo, SecretsRepo } from './db/repos.js'
+import { ProjectsRepo, SecretsRepo, BranchesRepo } from './db/repos.js'
 import { decryptSecret } from './crypto/secrets.js'
 import { ProvisioningService } from './services/provisioning.js'
+import { BranchService } from './services/branches.js'
 import type { ProviderAdapter } from './adapters/types.js'
 
 export type ServerDeps = {
@@ -41,6 +42,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const { uid, db } = await auth(req)
     const projects = await new ProjectsRepo(db).listByOwner(uid)
     return reply.send({ projects })
+  })
+
+  app.post('/projects/:id/branches', async (req, reply) => {
+    const { uid, token, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const name = (req.body as any)?.name
+    if (!name) return reply.code(400).send({ error: 'name is required' })
+    const from = (req.body as any)?.from ?? 'main'
+    const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
+    const out = await new BranchService(db, deps.cfg, adapters).createBranch(uid, projectId, name, from)
+    return reply.code(201).send(out)
+  })
+
+  app.get('/projects/:id/branches', async (req, reply) => {
+    const { uid, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const branches = await new BranchesRepo(db).listByProject(uid, projectId)
+    return reply.send({ branches })
   })
 
   app.get('/projects/:id/secrets', async (req, reply) => {
