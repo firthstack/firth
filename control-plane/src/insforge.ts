@@ -20,7 +20,8 @@ export function adminClient(cfg: FirthConfig): { database: DataClient; auth: Aut
     database: c.database as unknown as DataClient,
     auth: {
       async getCurrentUser() {
-        const { data } = await c.auth.getCurrentUser()
+        const { data, error } = await c.auth.getCurrentUser()
+        if (error) throw error // don't let a network/SDK failure read as "no user"
         return data?.user ? { id: data.user.id } : null
       },
     },
