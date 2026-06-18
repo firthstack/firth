@@ -4,7 +4,12 @@ const NEON_BASE = 'https://console.neon.tech/api/v2'
 const TERMINAL = ['finished', 'skipped', 'cancelled']
 
 export type NeonRef = { neonProjectId: string; defaultBranchId: string; dbName: string; roleName: string }
-export type NeonOptions = { baseUrl?: string; sleep?: (ms: number) => Promise<void>; pollMs?: number }
+export type NeonOptions = {
+  baseUrl?: string
+  sleep?: (ms: number) => Promise<void>
+  pollMs?: number
+  pollAttempts?: number
+}
 
 export class NeonAdapter {
   readonly kind = 'neon' as const
@@ -12,11 +17,13 @@ export class NeonAdapter {
   private baseUrl: string
   private sleep: (ms: number) => Promise<void>
   private pollMs: number
+  private pollAttempts: number
 
   constructor(private apiKey: string, private http: HttpClient, opts: NeonOptions = {}) {
     this.baseUrl = opts.baseUrl ?? NEON_BASE
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
     this.pollMs = opts.pollMs ?? 2000
+    this.pollAttempts = opts.pollAttempts ?? 60
   }
 
   private headers() {
@@ -43,11 +50,16 @@ export class NeonAdapter {
   private async awaitOps(projectId: string, operations: Array<{ id: string; status: string }>): Promise<void> {
     for (const op of operations ?? []) {
       let status = op.status
+      if (status === 'failed') throw new Error(`neon operation ${op.id} failed`)
+      let attempts = 0
       while (!TERMINAL.includes(status)) {
-        if (status === 'failed') throw new Error(`neon operation ${op.id} failed`)
+        if (++attempts > this.pollAttempts) {
+          throw new Error(`neon operation ${op.id} did not finish after ${this.pollAttempts} polls (last status: ${status})`)
+        }
         await this.sleep(this.pollMs)
         const got = await this.call('GET', `/projects/${projectId}/operations/${op.id}`)
         status = got.operation?.status ?? got.status
+        if (status === 'failed') throw new Error(`neon operation ${op.id} failed`)
       }
     }
   }

@@ -56,6 +56,17 @@ describe('NeonAdapter.provision', () => {
     const adapter = new NeonAdapter('neon_key', http, { sleep: noSleep })
     await expect(adapter.provision('demo')).rejects.toThrow(/operation op-x failed/)
   })
+
+  test('throws after the poll cap when an operation never reaches a terminal state', async () => {
+    const { http } = fakeHttp([
+      { match: (u, i) => i.method === 'POST', body: { project: { id: 'p' }, branch: { id: 'b' },
+        databases: [{ name: 'd' }], roles: [{ name: 'r' }], connection_uris: [{ connection_uri: 'x' }],
+        operations: [{ id: 'op-stuck', status: 'running' }] } },
+      { match: (u) => u.includes('/operations/op-stuck'), body: { operation: { status: 'running' } } },
+    ])
+    const adapter = new NeonAdapter('neon_key', http, { sleep: noSleep, pollAttempts: 3 })
+    await expect(adapter.provision('demo')).rejects.toThrow(/did not finish after 3 polls/)
+  })
 })
 
 describe('NeonAdapter.destroy', () => {
