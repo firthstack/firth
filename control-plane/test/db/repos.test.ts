@@ -1,12 +1,12 @@
 import { expect, test } from 'vitest'
-import { ProjectsRepo, SecretsRepo } from '../../src/db/repos.js'
+import { ProjectsRepo, SecretsRepo, ResourcesRepo, BranchesRepo } from '../../src/db/repos.js'
 
 // Minimal fake implementing the DataClient query-builder surface we use.
 // eq/is semantics mirror real PostgREST:
 //   eq(col, null)  → matches nothing (PostgREST emits col=eq.null, not IS NULL)
 //   is(col, null)  → matches rows where col is null/undefined
 function fakeDb(seed: Record<string, any[]> = {}) {
-  const tables: Record<string, any[]> = { projects: [], branches: [], secrets: [], ...seed }
+  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [], ...seed }
   return {
     tables,
     from(table: string) {
@@ -14,8 +14,13 @@ function fakeDb(seed: Record<string, any[]> = {}) {
       const filters: Array<(r: any) => boolean> = []
       const api: any = {
         insert(values: any) { const arr = Array.isArray(values) ? values : [values]
-          for (const v of arr) tables[table].push({ id: `id-${tables[table].length}`, ...v })
-          api._inserted = arr; return api },
+          const insertedIds: string[] = []
+          for (const v of arr) {
+            const id = `id-${tables[table].length}`
+            tables[table].push({ id, ...v })
+            insertedIds.push(id)
+          }
+          api._inserted = arr; api._insertedIds = insertedIds; return api },
         select() { api._mode = 'select'; return api },
         eq(col: string, val: any) {
           // PostgREST eq(col, null) emits col=eq.null — matches nothing (not IS NULL)
@@ -29,7 +34,12 @@ function fakeDb(seed: Record<string, any[]> = {}) {
         },
         async then(res: any) {
           if (api._mode === 'select') {
-            rows = tables[table].filter((r) => filters.every((fn) => fn(r)))
+            // If this is an insert().select(), return only the inserted rows
+            if (api._insertedIds) {
+              rows = tables[table].filter((r) => api._insertedIds.includes(r.id))
+            } else {
+              rows = tables[table].filter((r) => filters.every((fn) => fn(r)))
+            }
             return res({ data: rows, error: null })
           }
           return res({ data: api._inserted, error: null })
@@ -58,4 +68,25 @@ test('SecretsRepo.listForScope filters by project and null branch', async () => 
   const repo = new SecretsRepo(db as any)
   const rows = await repo.listForScope('o', 'p', null)
   expect(rows.map((r) => r.name)).toEqual(['S3_KEY'])
+})
+
+test('ResourcesRepo.findByKind returns the matching resource or null', async () => {
+  const db = fakeDb({ resources: [
+    { id: 'r1', owner: 'o', project_id: 'p', kind: 'neon', provider_ref: { neonProjectId: 'np' }, status: 'active' },
+    { id: 'r2', owner: 'o', project_id: 'p', kind: 's3', provider_ref: {}, status: 'active' },
+  ] })
+  const repo = new ResourcesRepo(db as any)
+  expect((await repo.findByKind('o', 'p', 'neon'))?.id).toBe('r1')
+  expect(await repo.findByKind('o', 'p', 'fly')).toBeNull()
+})
+
+test('BranchesRepo.findByName + create + listByProject', async () => {
+  const db = fakeDb({ branches: [
+    { id: 'b-main', owner: 'o', project_id: 'p', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' },
+  ] })
+  const repo = new BranchesRepo(db as any)
+  expect((await repo.findByName('o', 'p', 'main'))?.neon_branch_ref).toBe('br-main')
+  const created = await repo.create({ project_id: 'p', owner: 'o', name: 'feat', parent_branch_id: 'b-main', is_default: false, status: 'creating' })
+  expect(created.name).toBe('feat')
+  expect((await repo.listByProject('o', 'p')).map((b) => b.name).sort()).toEqual(['feat', 'main'])
 })

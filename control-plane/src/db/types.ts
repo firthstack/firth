@@ -4,6 +4,15 @@ export type NewSecretRow = {
   name: string; ciphertext: string; nonce: string; kek_version: string
 }
 export type SecretRow = NewSecretRow & { id: string }
+export type ResourceRow = {
+  id: string; project_id: string; owner: string
+  kind: string; provider_ref: Record<string, unknown>; status: string
+}
+export type BranchRow = {
+  id: string; project_id: string; owner: string; name: string
+  parent_branch_id: string | null; is_default: boolean
+  neon_branch_ref: string | null; status: string
+}
 
 // The subset of @insforge/sdk's `database` query builder we depend on.
 export interface QueryBuilder {
