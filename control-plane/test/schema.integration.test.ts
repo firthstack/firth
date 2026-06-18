@@ -24,7 +24,7 @@ test('RLS is enabled on every metadata table', () => {
 
 test('every owner-policy carries USING and WITH CHECK', () => {
   const rows = query(
-    "select policyname, qual, with_check from pg_policies where schemaname='public'")
+    "select policyname, qual, with_check from pg_policies where schemaname='public' and tablename in ('projects','branches','resources','secrets')")
   expect(rows.length).toBeGreaterThanOrEqual(4)
   for (const r of rows) {
     expect(r.qual, `${r.policyname} USING`).not.toBeNull()

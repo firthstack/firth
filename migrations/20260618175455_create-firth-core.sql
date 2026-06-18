@@ -68,7 +68,7 @@ CREATE TRIGGER resources_updated_at BEFORE UPDATE ON public.resources
   FOR EACH ROW EXECUTE FUNCTION system.update_updated_at();
 
 -- immutable owner guard
-CREATE OR REPLACE FUNCTION public.prevent_owner_change()
+CREATE FUNCTION public.prevent_owner_change()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.owner IS DISTINCT FROM OLD.owner THEN
