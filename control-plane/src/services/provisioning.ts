@@ -59,6 +59,8 @@ export class ProvisioningService {
         try { await this.db.from('resources').update({ status: 'error' }).eq('id', d.resourceId) } catch { /* best-effort */ }
       }
       // If we inserted a resource row but failed before pushing a handle, mark stragglers error.
+      // Safe to sweep by project_id: this project was just created and is exclusively owned by
+      // this saga. Revisit this assumption if provisioning ever becomes async or parallel.
       try {
         const pending = await this.db.from('resources').select().eq('project_id', project.id).eq('status', 'provisioning')
         for (const r of (pending.data ?? [])) {
