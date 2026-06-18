@@ -1,4 +1,4 @@
-import { ProjectsRepo } from '../db/repos.js'
+import { ProjectsRepo, firstOrThrow } from '../db/repos.js'
 import type { DataClient, Project } from '../db/types.js'
 
 export class ProjectService {
@@ -13,7 +13,7 @@ export class ProjectService {
       project_id: project.id, owner, name: 'main', is_default: true, status: 'active',
     }).select()
     if (error) throw error
-    const branch = data![0] as { id: string; name: string }
+    const branch = firstOrThrow(data, 'branches') as { id: string; name: string }
     return { project, defaultBranch: { id: branch.id, name: branch.name } }
   }
 }

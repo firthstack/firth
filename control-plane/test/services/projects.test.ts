@@ -24,6 +24,7 @@ test('createProject creates project then a default main branch', async () => {
   const out = await svc.createProject('owner-1', 'demo')
   expect(out.project.name).toBe('demo')
   expect(out.defaultBranch.name).toBe('main')
+  expect(out.defaultBranch.id).toBeTruthy()
   expect(db.tables.branches[0].is_default).toBe(true)
   expect(db.tables.branches[0].owner).toBe('owner-1')
   expect(db.tables.branches[0].project_id).toBe(out.project.id)
