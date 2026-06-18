@@ -26,6 +26,9 @@ function fakeData() {
         return api
       },
       update(v: any) { mode = 'update'; updatePayload = v; return api },
+      // Intentionally a no-op: keeps the preceding mode so `insert().select()` returns the
+      // inserted row (what the repos/saga rely on). `update().select()` is never used here;
+      // if it ever is, this fake would need a distinct update-returning-rows path.
       select() { return api },
       eq(c: string, val: any) {
         filters.push(val === null ? () => false : (r: any) => r[c] === val)
