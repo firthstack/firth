@@ -1,0 +1,71 @@
+import { describe, expect, test } from 'vitest'
+import { NeonAdapter } from '../../src/adapters/neon.js'
+import type { HttpClient } from '../../src/adapters/types.js'
+
+// Build a fake HttpClient that records calls and returns scripted responses.
+function fakeHttp(routes: Array<{ match: (url: string, init: any) => boolean; status?: number; body: any }>) {
+  const calls: Array<{ url: string; init: any }> = []
+  const http: HttpClient = async (url, init) => {
+    calls.push({ url, init })
+    const r = routes.find((x) => x.match(url, init))
+    if (!r) throw new Error(`unexpected call: ${init.method} ${url}`)
+    return { status: r.status ?? 200, json: async () => r.body, text: async () => JSON.stringify(r.body) }
+  }
+  return { http, calls }
+}
+
+const noSleep = async () => {}
+
+describe('NeonAdapter.provision', () => {
+  test('creates a project, captures provider_ref, waits for operations', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/projects'),
+        body: { project: { id: 'proj-1' }, branch: { id: 'br-main' },
+                databases: [{ name: 'neondb' }], roles: [{ name: 'neondb_owner' }],
+                connection_uris: [{ connection_uri: 'postgresql://x' }],
+                operations: [{ id: 'op-1', status: 'running' }] } },
+      { match: (u) => u.includes('/operations/op-1'), body: { operation: { status: 'finished' } } },
+    ])
+    const adapter = new NeonAdapter('neon_key', http, { sleep: noSleep })
+    const handle = await adapter.provision('demo')
+    expect(handle.kind).toBe('neon')
+    expect(handle.providerRef).toEqual({
+      neonProjectId: 'proj-1', defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner',
+    })
+    // Authorization header carries the bearer key; project name in the POST body.
+    const post = calls.find((c) => c.init.method === 'POST')!
+    expect(post.init.headers.Authorization).toBe('Bearer neon_key')
+    expect(JSON.parse(post.init.body)).toEqual({ project: { name: 'demo' } })
+  })
+
+  test('throws (and does not leak the key) on a non-2xx create', async () => {
+    const { http } = fakeHttp([
+      { match: (u, i) => i.method === 'POST', status: 422, body: { message: 'bad' } },
+    ])
+    const adapter = new NeonAdapter('neon_key', http, { sleep: noSleep })
+    await expect(adapter.provision('demo')).rejects.toThrow(/neon POST \/projects failed: 422/)
+    await expect(adapter.provision('demo')).rejects.not.toThrow(/neon_key/)
+  })
+
+  test('throws if an operation reports failed', async () => {
+    const { http } = fakeHttp([
+      { match: (u, i) => i.method === 'POST', body: { project: { id: 'p' }, branch: { id: 'b' },
+        databases: [{ name: 'd' }], roles: [{ name: 'r' }], connection_uris: [{ connection_uri: 'x' }],
+        operations: [{ id: 'op-x', status: 'failed' }] } },
+    ])
+    const adapter = new NeonAdapter('neon_key', http, { sleep: noSleep })
+    await expect(adapter.provision('demo')).rejects.toThrow(/operation op-x failed/)
+  })
+})
+
+describe('NeonAdapter.destroy', () => {
+  test('issues DELETE /projects/{id}', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'DELETE' && u.endsWith('/projects/proj-1'), body: {} },
+    ])
+    const adapter = new NeonAdapter('neon_key', http, { sleep: noSleep })
+    await adapter.destroy({ kind: 'neon', providerRef: { neonProjectId: 'proj-1', defaultBranchId: 'b', dbName: 'd', roleName: 'r' } })
+    expect(calls[0].init.method).toBe('DELETE')
+    expect(calls[0].url).toMatch(/\/projects\/proj-1$/)
+  })
+})
