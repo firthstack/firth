@@ -52,15 +52,19 @@ export class ProvisioningService {
         resources: done.map((d) => ({ kind: d.adapter.kind, status: 'active' })),
       }
     } catch (err) {
+      // Rollback bookkeeping is BEST-EFFORT: every step is individually guarded so a
+      // destroy or DB fault during cleanup can never replace the original error.
       for (const d of [...done].reverse()) {
-        try { await d.adapter.destroy(d.handle) } catch { /* best-effort cleanup */ }
-        await this.db.from('resources').update({ status: 'error' }).eq('id', d.resourceId)
+        try { await d.adapter.destroy(d.handle) } catch { /* best-effort: never mask err */ }
+        try { await this.db.from('resources').update({ status: 'error' }).eq('id', d.resourceId) } catch { /* best-effort */ }
       }
-      // If we inserted a resource row but failed before pushing a handle, mark the latest provisioning row error.
-      const pending = await this.db.from('resources').select().eq('project_id', project.id).eq('status', 'provisioning')
-      for (const r of (pending.data ?? [])) {
-        await this.db.from('resources').update({ status: 'error' }).eq('id', (r as { id: string }).id)
-      }
+      // If we inserted a resource row but failed before pushing a handle, mark stragglers error.
+      try {
+        const pending = await this.db.from('resources').select().eq('project_id', project.id).eq('status', 'provisioning')
+        for (const r of (pending.data ?? [])) {
+          try { await this.db.from('resources').update({ status: 'error' }).eq('id', (r as { id: string }).id) } catch { /* best-effort */ }
+        }
+      } catch { /* best-effort: never mask err */ }
       throw err
     }
   }

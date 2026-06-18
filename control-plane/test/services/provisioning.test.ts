@@ -94,5 +94,40 @@ describe('ProvisioningService.provisionProject', () => {
     await expect(svc.provisionProject('owner-1', 'demo')).rejects.toThrow(/mint failed/)
     expect((neon as any).destroyed).toEqual(['np-demo']) // destroy compensated
     expect(db.tables.resources[0].status).toBe('error')
+    expect(db.tables.secrets.length).toBe(0) // nothing persisted when minting failed
+  })
+
+  test('a DB fault during rollback never masks the original provision error', async () => {
+    // A db that works normally but throws when the rollback marks a resource status='error'.
+    const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [] }
+    const db = {
+      from(t: string) {
+        const filters: Array<[string, any]> = []
+        let mode: 'insert' | 'select' | 'update' = 'select'
+        let payload: any
+        const api: any = {
+          insert(v: any) { mode = 'insert'; payload = { id: `${t}-${tables[t].length}`, ...v }; tables[t].push(payload); return api },
+          update(v: any) { mode = 'update'; payload = v; return api },
+          select() { return api },
+          eq(c: string, val: any) { filters.push([c, val]); return api },
+          is() { return api },
+          then(resolve: any, reject: any) {
+            if (mode === 'update') {
+              if (payload.status === 'error') { reject(new Error('db down during rollback')); return }
+              for (const row of tables[t]) if (filters.every(([c, v]) => row[c] === v)) Object.assign(row, payload)
+              resolve({ data: [], error: null }); return
+            }
+            if (mode === 'insert') { resolve({ data: [payload], error: null }); return }
+            resolve({ data: tables[t].filter((r) => filters.every(([c, v]) => r[c] === v)), error: null })
+          },
+        }
+        return api
+      },
+    }
+    const neon = fakeNeon({ async mintCredentials() { throw new Error('mint failed') } })
+    const svc = new ProvisioningService(db as any, cfg, [neon as any])
+    // Must reject with the ORIGINAL error, not 'db down during rollback'.
+    await expect(svc.provisionProject('owner-1', 'demo')).rejects.toThrow(/mint failed/)
+    expect((neon as any).destroyed).toEqual(['np-demo']) // destroy still attempted
   })
 })
