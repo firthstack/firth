@@ -2,6 +2,8 @@ import { homedir } from 'node:os'
 import { login, logout } from './commands/auth.js'
 import { projectCreate, projectLink, projectList } from './commands/project.js'
 import { branchCreate, branchList } from './commands/branch.js'
+import { secrets } from './commands/secrets.js'
+import { skillsPull } from './commands/skills.js'
 
 export type CliDeps = {
   print: (s: string) => void
@@ -34,6 +36,8 @@ COMMANDS['project link'] = projectLink
 COMMANDS['project list'] = projectList
 COMMANDS['branch create'] = branchCreate
 COMMANDS['branch list'] = branchList
+COMMANDS['secrets'] = secrets
+COMMANDS['skills pull'] = skillsPull
 
 export async function route(argv: string[], deps: CliDeps): Promise<number> {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {

@@ -7,7 +7,7 @@
     "firth": "dist/src/cli/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/cli/skills','dist/src/cli/skills',{recursive:true})\"",
     "test": "vitest run",
     "dev": "tsx src/index.ts",
     "live:neon": "tsx scripts/live-neon-check.ts",
