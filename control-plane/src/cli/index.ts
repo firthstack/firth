@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { homedir } from 'node:os'
 import { login, logout } from './commands/auth.js'
 import { projectCreate, projectLink, projectList } from './commands/project.js'

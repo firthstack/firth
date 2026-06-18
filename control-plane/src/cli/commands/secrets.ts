@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { readProjectLink } from '../config.js'
@@ -21,9 +21,18 @@ export async function secrets(argv: string[], deps: CliDeps & { makeApi?: () => 
   const project = await api.getSecrets(link.projectId)
   const branch = await api.getSecrets(link.projectId, target.id)
   const bundle = { ...project, ...branch }
-  const lines = Object.entries(bundle).map(([k, v]) => `${k}=${v}`)
+  // Merge Firth-managed keys into any existing .env, preserving user-added lines/comments.
   const path = join(deps.cwd, '.env')
-  writeFileSync(path, lines.length ? lines.join('\n') + '\n' : '')
-  deps.print(`wrote ${lines.length} secrets to ${path}`) // values never printed
+  const firthKeys = new Set(Object.keys(bundle))
+  const existing = existsSync(path) ? readFileSync(path, 'utf8') : ''
+  const kept = existing.split('\n').filter((line) => {
+    const key = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=/)?.[1]
+    return !(key && firthKeys.has(key)) // drop stale Firth keys; keep user vars/comments/blanks
+  })
+  while (kept.length && kept[kept.length - 1].trim() === '') kept.pop() // trim trailing blanks
+  const firthLines = Object.entries(bundle).map(([k, v]) => `${k}=${v}`)
+  const merged = [...kept, ...firthLines]
+  writeFileSync(path, merged.length ? merged.join('\n') + '\n' : '')
+  deps.print(`wrote ${firthLines.length} secrets to ${path}`) // values never printed
   return 0
 }
