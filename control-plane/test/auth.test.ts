@@ -15,3 +15,7 @@ test('rejects a missing header', async () => {
 test('rejects a token the backend does not recognize', async () => {
   await expect(resolveUid('Bearer bad', verifyOk)).rejects.toBeInstanceOf(UnauthorizedError)
 })
+
+test('rejects an empty token after the Bearer prefix', async () => {
+  await expect(resolveUid('Bearer   ', verifyOk)).rejects.toBeInstanceOf(UnauthorizedError)
+})
