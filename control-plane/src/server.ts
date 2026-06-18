@@ -16,8 +16,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: false })
 
   app.setErrorHandler((err, _req, reply) => {
-    if (err instanceof UnauthorizedError) return reply.code(401).send({ error: err.message })
-    return reply.code(500).send({ error: 'internal error' }) // never echo err details (may carry secrets)
+    // Static strings only — never echo err.message/stack (they may carry tokens or secrets).
+    if (err instanceof UnauthorizedError) return reply.code(401).send({ error: 'unauthorized' })
+    return reply.code(500).send({ error: 'internal error' })
   })
 
   async function auth(req: any) {
