@@ -184,6 +184,26 @@ test('POST /projects/:id/deploy forwards branch param to deploy the named branch
   expect(captured.handle.providerRef.flyApp).toBe('a-feat')
 })
 
+test('POST /projects/:id/deploy: `from` overrides the caller\'s linked branch', async () => {
+  const db = fakeData()
+  db.tables.branches.push({ id: 'b-main', owner: 'uid-1', project_id: 'p1', name: 'main', is_default: true, neon_branch_ref: 'br-main', status: 'active' })
+  db.tables.branches.push({ id: 'b-feat', owner: 'uid-1', project_id: 'p1', name: 'feature', is_default: false, neon_branch_ref: 'br-feat', status: 'active' })
+  db.tables.resources.push({ id: 'r-main', owner: 'uid-1', project_id: 'p1', kind: 'fly', branch_id: 'b-main', provider_ref: { flyApp: 'a-main', orgSlug: 'org' }, status: 'active' })
+  db.tables.resources.push({ id: 'r-feat', owner: 'uid-1', project_id: 'p1', kind: 'fly', branch_id: 'b-feat', provider_ref: { flyApp: 'a-feat', orgSlug: 'org' }, status: 'active' })
+  const captured: any = {}
+  const fly = {
+    kind: 'fly', branchModel: 'redeploy',
+    async provision() { return { kind: 'fly', providerRef: {} } }, async destroy() {},
+    async createBranch() { return null }, async deleteBranch() {}, async mintCredentials() { return {} }, async readUsage() { return {} },
+    async deploy(h: any, opts: any) { captured.handle = h; captured.opts = opts; return { machineId: 'm-feat', url: 'https://a-feat.fly.dev' } },
+  }
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fly as any] })
+  // linked branch is main, but `from: feature` (by name) must win
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/deploy', headers: { authorization: 'Bearer good' }, payload: { image: 'nginx', from: 'feature', branch: 'b-main' } })
+  expect(r.statusCode).toBe(200)
+  expect(captured.handle.providerRef.flyApp).toBe('a-feat')
+})
+
 test('POST then GET /projects/:id/events records + lists newest-first', async () => {
   const db = fakeData()
   const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })

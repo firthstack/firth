@@ -131,7 +131,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const projectId = (req.params as any).id
     const body = (req.body as any) ?? {}
     if (!body.image) return reply.code(400).send({ error: 'image is required' })
-    let branch: string | undefined = body.branch
+    // `from` is an explicit branch override (id or name); otherwise the caller's
+    // linked branch (`branch`), otherwise the project's default branch.
+    let branch: string | undefined = body.from ?? body.branch
     if (!branch) {
       const all = await new BranchesRepo(db).listByProject(uid, projectId)
       branch = (all.find((b) => b.is_default) ?? all[0])?.id
