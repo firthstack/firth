@@ -58,7 +58,7 @@ The rare alignment at the core of this thesis: **the cheapest wedge to enter (cr
 - [x] **Foundation** — control plane on InsForge: auth, metadata schema (projects / branches / resources / secrets) with RLS, AES-256-GCM secret store + the single secret seam, projects API.
 - [ ] Provider adapters: Neon → S3 → Fly.io, with `create project` saga + rollback.
 - [ ] Branching (Neon-native DB branch; shared storage; redeploy compute).
-- [ ] `firth-cli` + provider-skill download + `deploy`.
+- [ ] the firth CLI + provider-skill download + `deploy`.
 - [ ] Observability: agent-action ↔ resource-side-effect correlation + dashboard.
 
 ## Architecture

@@ -43,7 +43,7 @@ Two same-named-but-different concepts kept distinct in code and docs: a **`firth
 
 - **Control plane API (the brain)** — runs on **InsForge compute**. The single source of truth.
 - **Web app / dashboard** — runs on **InsForge sites**. For humans.
-- **firth-cli** — the agent/dev interface. Like the web app, just a client of the control-plane API.
+- **The firth CLI** — the agent/dev interface. Like the web app, just a client of the control-plane API.
 
 ### Subsystem → InsForge primitive
 
@@ -151,7 +151,7 @@ The unit is "agent action ↔ resource side-effect" (e.g. *agent issued a refund
 
 **Built (Foundation, `control-plane/`, TypeScript/Node on InsForge):** metadata schema + RLS migration; AES-256-GCM secret module with versioned KEK; config loader; injectable repository layer; InsForge client factory (admin + per-user-token, SDK confined to one file); bearer-token auth; project service; Fastify API (`POST/GET /projects` + the `GET /projects/:id/secrets` seam); Dockerfile + bootstrap. Full test suite green.
 
-**Build order from here:** (1) Neon adapter + `create project` saga → (2) S3 + Fly adapters → (3) branching → (4) `firth-cli` + skill download + `deploy` → (5) Observe correlation + dashboard.
+**Build order from here:** (1) Neon adapter + `create project` saga → (2) S3 + Fly adapters → (3) branching → (4) the firth CLI + skill download + `deploy` → (5) Observe correlation + dashboard.
 
 **Known gaps (tracked):** automated cross-user RLS isolation test (needs authenticated-token fixtures — current tests verify policy shape); admin-context secret writes for the background saga; moving the KEK from env into the InsForge secrets vault; live compute deploy (InsForge compute is private preview and needs the project's anon key + access).
 
