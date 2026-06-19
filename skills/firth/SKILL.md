@@ -25,7 +25,7 @@ Every project automatically gets three base resources — build your app directl
    - `firth project create <name>` — provisions DB + storage + compute.
    - `firth project link <id>` — link an existing project.
 2. `firth secrets` — write the current branch's credentials into `./.env`. **This is how an agent gets DB/storage access.** (`--branch <id>` targets a specific branch.)
-3. `firth deploy --image <url>` — deploy a container image to the project's compute (`--port`, `--from`).
+3. `firth deploy --image <url>` — deploy a container image to the **current branch's** compute (`--port`; `--from <branch>` targets a specific branch's app instead).
 4. `firth events` — the action ↔ resource-side-effect timeline (`--branch`, `--limit`).
 
 ## Database & migrations
@@ -34,9 +34,9 @@ You connect **directly** to the Postgres database (the `DATABASE_URL` from `firt
 ## Branching — isolate risky changes
 Before a high-risk change (schema migration, data backfill, risky refactor), do the work on a **branch**, verify it, then merge back to `main`.
 
-- `firth branch create <name>` creates an **isolated Neon DB branch** — a full copy of the parent's data, isolated from `main` — and gives it its own `DATABASE_URL`.
-  - **Storage and compute are NOT branched.** The storage bucket is **shared** across branches. Compute is the project's **single shared app** (redeploy-to-restore) — to bring up the branch's environment, **redeploy your branch's code** to it (`firth deploy`). Because the compute is shared, deploying a branch redeploys that one app to the branch's code, so only one branch's app runs at a time.
-- `firth branch switch <name>` then `firth secrets` → `./.env` now has the branch's `DATABASE_URL`. Run your migrations against the branch DB and deploy → an isolated branch environment to validate the change.
+- `firth branch create <name>` provisions an **isolated environment** for the branch: a new **Neon DB branch** (a full copy of the parent's data, isolated from `main`, with its own `DATABASE_URL`) **and a new dedicated compute** (its own Fly app). **Only the storage bucket is shared** across branches.
+  - Each branch has its own compute app, so multiple branches' environments run **in parallel** — working on one branch never disturbs another's. To rebuild the branch's running environment, **redeploy your branch's code** to its app (`firth deploy` targets the current branch's compute).
+- `firth branch switch <name>` then `firth secrets` → `./.env` now has the branch's `DATABASE_URL`. Run your migrations against the branch DB, then `firth deploy` → the branch's isolated compute runs your branch code, an environment to validate the change.
 
 ### Merging a branch back to main
 Firth does **not** auto-merge — you do it in your local code repo:
@@ -47,10 +47,10 @@ Firth does **not** auto-merge — you do it in your local code repo:
 
 ## Delete (destructive — require `--yes`)
 - `firth project delete --yes` — tears down ALL resources (Neon DB, Fly app, Tigris bucket) and unlinks the directory.
-- `firth branch delete <name> --yes` — tears down the branch's Neon branch. The default branch can't be deleted.
+- `firth branch delete <name> --yes` — tears down the branch's Neon branch **and its Fly app**. The default branch can't be deleted.
 
 ## Rules for agents
 - Treat `./.env` as the **only** source of resource credentials — run `firth secrets` to populate it; never hardcode credential values or print them.
-- `DATABASE_URL` is isolated **per branch**; storage credentials (`AWS_*` / `BUCKET_NAME`) are **shared** across branches.
+- `DATABASE_URL` **and compute** are isolated **per branch**; storage credentials (`AWS_*` / `BUCKET_NAME`) are **shared** across branches.
 - Track all DB schema changes as files under `migrations/` so they can be replayed on a branch DB and on `main` after merge.
 - The CLI auto-installs `flyctl` (via Homebrew) when missing during project/branch commands, so the Fly app is manageable directly if needed.
