@@ -137,3 +137,25 @@ test('GET secrets branch-scoped returns only branch secrets, not project-scoped 
   expect(projResp.json().secrets).toEqual({ PROJ_SECRET: 'project-value' })
   expect(projResp.json().secrets).not.toHaveProperty('BRANCH_SECRET')
 })
+
+test('POST /projects/:id/deploy deploys the image via DeployService', async () => {
+  const db = fakeData()
+  db.tables.branches.push({ id: 'b-main', owner: 'uid-1', project_id: 'p1', name: 'main', is_default: true, neon_branch_ref: 'br', status: 'active' })
+  db.tables.resources.push({ id: 'r', owner: 'uid-1', project_id: 'p1', kind: 'fly', provider_ref: { flyApp: 'app', orgSlug: 'org' }, status: 'active' })
+  const fly = {
+    kind: 'fly', branchModel: 'redeploy',
+    async provision() { return { kind: 'fly', providerRef: {} } }, async destroy() {},
+    async createBranch() { return null }, async deleteBranch() {}, async mintCredentials() { return {} }, async readUsage() { return {} },
+    async deploy(_h: any, opts: any) { return { machineId: 'm-9', url: `https://app.fly.dev` } },
+  }
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fly as any] })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/deploy', headers: { authorization: 'Bearer good' }, payload: { image: 'nginx', port: 80 } })
+  expect(r.statusCode).toBe(200)
+  expect(r.json()).toEqual({ machineId: 'm-9', url: 'https://app.fly.dev' })
+})
+
+test('POST /projects/:id/deploy requires an image', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => fakeData() as any, adaptersForToken: () => [] })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/deploy', headers: { authorization: 'Bearer good' }, payload: {} })
+  expect(r.statusCode).toBe(400)
+})

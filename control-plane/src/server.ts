@@ -6,6 +6,7 @@ import { ProjectsRepo, SecretsRepo, BranchesRepo } from './db/repos.js'
 import { decryptSecret } from './crypto/secrets.js'
 import { ProvisioningService } from './services/provisioning.js'
 import { BranchService } from './services/branches.js'
+import { DeployService } from './services/deploy.js'
 import type { ProviderAdapter } from './adapters/types.js'
 
 export type ServerDeps = {
@@ -73,6 +74,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         { ciphertext: row.ciphertext, nonce: row.nonce, kekVersion: row.kek_version }, deps.cfg.keks)
     }
     return reply.send({ secrets: bundle })
+  })
+
+  app.post('/projects/:id/deploy', async (req, reply) => {
+    const { uid, token, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const body = (req.body as any) ?? {}
+    if (!body.image) return reply.code(400).send({ error: 'image is required' })
+    const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
+    const out = await new DeployService(db, deps.cfg, adapters).deploy(uid, projectId, {
+      image: body.image, from: body.from, port: body.port,
+    })
+    return reply.send(out)
   })
 
   return app
