@@ -13,6 +13,31 @@ function fake(routes: Array<{ match: (u: string, i: any) => boolean; status?: nu
   return { http, calls }
 }
 
+/** Build a fake IAM SignedHttp that switches on Action= in the body and records calls. */
+function fakeIam(bucketName: string) {
+  const calls: Array<{ action: string; body: string; url: string }> = []
+
+  const xmlResponses: Record<string, string> = {
+    CreateAccessKey: `<CreateAccessKeyResponse><CreateAccessKeyResult><AccessKey><AccessKeyId>tid_test123</AccessKeyId><SecretAccessKey>secret-xyz</SecretAccessKey></AccessKey></CreateAccessKeyResult></CreateAccessKeyResponse>`,
+    CreatePolicy: `<CreatePolicyResponse><CreatePolicyResult><Policy><Arn>arn:aws:iam::to_x:policy/firth-${bucketName}</Arn></Policy></CreatePolicyResult></CreatePolicyResponse>`,
+    AttachUserPolicy: '',
+    DetachUserPolicy: '',
+    DeletePolicy: '',
+    DeleteAccessKey: '',
+  }
+
+  const iam: SignedHttp = async (url, init) => {
+    const body = init.body ?? ''
+    const actionMatch = body.match(/Action=([^&]+)/)
+    const action = actionMatch ? decodeURIComponent(actionMatch[1]) : 'Unknown'
+    calls.push({ action, body, url })
+    const xml = xmlResponses[action] ?? ''
+    return { status: 200, json: async () => ({}), text: async () => xml }
+  }
+
+  return { iam, calls }
+}
+
 describe('TigrisAdapter provision/destroy', () => {
   test('provision PUTs a bucket at the S3 endpoint and returns a non-secret providerRef', async () => {
     const { http, calls } = fake([{ match: (u, i) => i.method === 'PUT', status: 200 }])
@@ -30,7 +55,7 @@ describe('TigrisAdapter provision/destroy', () => {
     expect(JSON.stringify(handle.providerRef)).not.toMatch(/secret|key/i)
   })
 
-  test('destroy DELETEs the bucket', async () => {
+  test('destroy DELETEs the bucket (no accessKeyId — bucket-only teardown)', async () => {
     const { http, calls } = fake([{ match: (u, i) => i.method === 'DELETE', status: 204 }])
     const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
     const adapter = new TigrisAdapter(http, noop)
@@ -54,25 +79,135 @@ describe('TigrisAdapter provision/destroy', () => {
 })
 
 describe('TigrisAdapter.mintCredentials', () => {
-  test('creates a bucket-scoped key via the IAM endpoint and returns the S3 bundle', async () => {
-    const calls: any[] = []
-    const s3: any = async () => ({ status: 200, json: async () => ({}), text: async () => '' })
-    const iam: any = async (url: string, init: any) => {
-      calls.push({ url, init })
-      return { status: 200, json: async () => ({ access_key_id: 'tid_new', secret_access_key: 'tsec_new' }), text: async () => '' }
-    }
+  test('issues CreateAccessKey + CreatePolicy (scoped to bucket ARN) + AttachUserPolicy, returns bundle, mutates providerRef', async () => {
+    const bucket = 'firth-x-abc'
+    const { iam, calls } = fakeIam(bucket)
+    const s3: SignedHttp = async () => ({ status: 200, json: async () => ({}), text: async () => '' })
     const adapter = new TigrisAdapter(s3, iam)
-    const handle = { kind: 's3' as const, providerRef: { bucket: 'firth-x-abc', endpoint: 'https://t3.storage.dev', region: 'auto' } }
+    const handle = { kind: 's3' as const, providerRef: { bucket, endpoint: 'https://t3.storage.dev', region: 'auto' } }
+
     const bundle = await adapter.mintCredentials(handle)
+
+    // Returned bundle
     expect(bundle).toEqual({
-      AWS_ACCESS_KEY_ID: 'tid_new',
-      AWS_SECRET_ACCESS_KEY: 'tsec_new',
+      AWS_ACCESS_KEY_ID: 'tid_test123',
+      AWS_SECRET_ACCESS_KEY: 'secret-xyz',
       AWS_ENDPOINT_URL_S3: 'https://t3.storage.dev',
-      BUCKET_NAME: 'firth-x-abc',
+      BUCKET_NAME: bucket,
       AWS_REGION: 'auto',
     })
-    // the IAM request references the bucket in its scoped policy
-    expect(calls[0].url).toContain('https://iam.storage.dev')
-    expect(JSON.stringify(calls[0].init.body ?? '')).toContain('firth-x-abc')
+
+    // Three IAM calls in order
+    expect(calls.map(c => c.action)).toEqual(['CreateAccessKey', 'CreatePolicy', 'AttachUserPolicy'])
+
+    // CreatePolicy body scopes to bucket ARN
+    const createPolicyCall = calls.find(c => c.action === 'CreatePolicy')!
+    const policyDocRaw = decodeURIComponent(createPolicyCall.body.match(/PolicyDocument=([^&]+)/)?.[1] ?? '')
+    expect(policyDocRaw).toContain(`arn:aws:s3:::${bucket}/*`)
+    expect(policyDocRaw).toContain(`arn:aws:s3:::${bucket}`)
+
+    // AttachUserPolicy uses the minted key id as UserName
+    const attachCall = calls.find(c => c.action === 'AttachUserPolicy')!
+    expect(attachCall.body).toContain('UserName=tid_test123')
+
+    // handle.providerRef mutated with minted handles
+    const ref = handle.providerRef as any
+    expect(ref.accessKeyId).toBe('tid_test123')
+    expect(ref.policyArn).toBe(`arn:aws:iam::to_x:policy/firth-${bucket}`)
+  })
+
+  test('non-2xx from CreateAccessKey makes mintCredentials throw', async () => {
+    const s3: SignedHttp = async () => ({ status: 200, json: async () => ({}), text: async () => '' })
+    const iam: SignedHttp = async () => ({ status: 403, json: async () => ({}), text: async () => '<Error/>' })
+    const adapter = new TigrisAdapter(s3, iam)
+    const handle = { kind: 's3' as const, providerRef: { bucket: 'firth-x', endpoint: 'https://t3.storage.dev', region: 'auto' } }
+    await expect(adapter.mintCredentials(handle)).rejects.toThrow(/CreateAccessKey.*403/)
+  })
+})
+
+describe('TigrisAdapter.destroy (with minted handles)', () => {
+  test('destroy with accessKeyId+policyArn issues DetachUserPolicy + DeletePolicy + DeleteAccessKey + bucket DELETE', async () => {
+    const bucket = 'firth-x-abc'
+    const { iam, calls: iamCalls } = fakeIam(bucket)
+    const s3Calls: any[] = []
+    const s3: SignedHttp = async (url, init) => {
+      s3Calls.push({ url, init })
+      return { status: 204, json: async () => ({}), text: async () => '' }
+    }
+    const adapter = new TigrisAdapter(s3, iam)
+    const handle = {
+      kind: 's3' as const,
+      providerRef: {
+        bucket,
+        endpoint: 'https://t3.storage.dev',
+        region: 'auto',
+        accessKeyId: 'tid_test123',
+        policyArn: `arn:aws:iam::to_x:policy/firth-${bucket}`,
+      },
+    }
+
+    await adapter.destroy(handle)
+
+    // IAM teardown sequence
+    expect(iamCalls.map(c => c.action)).toEqual(['DetachUserPolicy', 'DeletePolicy', 'DeleteAccessKey'])
+
+    // Bucket DELETE
+    expect(s3Calls.length).toBe(1)
+    expect(s3Calls[0].init.method).toBe('DELETE')
+    expect(s3Calls[0].url).toContain(bucket)
+  })
+
+  test('destroy with no accessKeyId/policyArn still deletes the bucket and does not throw', async () => {
+    const bucket = 'firth-no-mint'
+    const iamCalls: any[] = []
+    const iam: SignedHttp = async (url, init) => {
+      iamCalls.push({ url, init })
+      return { status: 200, json: async () => ({}), text: async () => '' }
+    }
+    const s3Calls: any[] = []
+    const s3: SignedHttp = async (url, init) => {
+      s3Calls.push({ url, init })
+      return { status: 204, json: async () => ({}), text: async () => '' }
+    }
+    const adapter = new TigrisAdapter(s3, iam)
+    const handle = {
+      kind: 's3' as const,
+      providerRef: { bucket, endpoint: 'https://t3.storage.dev', region: 'auto' },
+    }
+
+    await expect(adapter.destroy(handle)).resolves.toBeUndefined()
+
+    // No IAM calls (nothing to detach/delete)
+    expect(iamCalls.length).toBe(0)
+
+    // Bucket still deleted
+    expect(s3Calls.length).toBe(1)
+    expect(s3Calls[0].init.method).toBe('DELETE')
+    expect(s3Calls[0].url).toContain(bucket)
+  })
+
+  test('destroy collects all step failures and throws aggregated error', async () => {
+    const bucket = 'firth-fail'
+    let iamCallCount = 0
+    const iam: SignedHttp = async () => {
+      iamCallCount++
+      return { status: 500, json: async () => ({}), text: async () => '<Error/>' }
+    }
+    const s3: SignedHttp = async () => ({ status: 204, json: async () => ({}), text: async () => '' })
+    const adapter = new TigrisAdapter(s3, iam)
+    const handle = {
+      kind: 's3' as const,
+      providerRef: {
+        bucket,
+        endpoint: 'https://t3.storage.dev',
+        region: 'auto',
+        accessKeyId: 'tid_abc',
+        policyArn: 'arn:aws:iam::x:policy/firth-fail',
+      },
+    }
+
+    await expect(adapter.destroy(handle)).rejects.toThrow()
+    // All three IAM steps were attempted despite failures
+    expect(iamCallCount).toBe(3)
   })
 })

@@ -6,12 +6,23 @@ const S3_ENDPOINT = 'https://t3.storage.dev'
 const IAM_ENDPOINT = 'https://iam.storage.dev'
 const REGION = 'auto'
 
-export type TigrisRef = { bucket: string; endpoint: string; region: string }
+export type TigrisRef = {
+  bucket: string
+  endpoint: string
+  region: string
+  accessKeyId?: string
+  policyArn?: string
+}
 export type TigrisOptions = { s3Endpoint?: string; iamEndpoint?: string; region?: string }
 
 export function mkBucketName(projectName: string, rand: string): string {
   const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'bucket'
   return `firth-${slug}-${rand}`
+}
+
+/** Extract the text content of a single XML tag from a response string. */
+function xmlField(text: string, tag: string): string | undefined {
+  return text.match(new RegExp(`<${tag}>([^<]+)</${tag}>`))?.[1]
 }
 
 export class TigrisAdapter implements ProviderAdapter {
@@ -27,6 +38,21 @@ export class TigrisAdapter implements ProviderAdapter {
     this.region = opts.region ?? REGION
   }
 
+  /** POST an AWS IAM Query-protocol action and return the raw response text. Throws on non-2xx. */
+  private async iamAction(params: Record<string, string>): Promise<string> {
+    const body = new URLSearchParams({ Version: '2010-05-08', ...params }).toString()
+    const res = await this.iam(this.iamEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+    if (res.status < 200 || res.status >= 300) {
+      const action = params.Action ?? 'Unknown'
+      throw new Error(`${action} failed: ${res.status}`)
+    }
+    return res.text()
+  }
+
   async provision(projectName: string): Promise<ResourceHandle> {
     const bucket = mkBucketName(projectName, randomBytes(4).toString('hex'))
     // S3 CreateBucket = PUT to the bucket subresource (path-style against the Tigris endpoint).
@@ -38,8 +64,44 @@ export class TigrisAdapter implements ProviderAdapter {
 
   async destroy(handle: ResourceHandle): Promise<void> {
     const ref = handle.providerRef as TigrisRef
-    const res = await this.s3(`${this.s3Endpoint}/${ref.bucket}`, { method: 'DELETE' })
-    if (res.status < 200 || res.status >= 300) throw new Error(`tigris DELETE /${ref.bucket} failed: ${res.status}`)
+    const { bucket, accessKeyId, policyArn } = ref
+
+    const errors: Error[] = []
+
+    // --- IAM teardown (only if keys were minted) ---
+    if (accessKeyId && policyArn) {
+      try {
+        await this.iamAction({ Action: 'DetachUserPolicy', UserName: accessKeyId, PolicyArn: policyArn })
+      } catch (e) {
+        errors.push(e as Error)
+      }
+    }
+
+    if (policyArn) {
+      try {
+        await this.iamAction({ Action: 'DeletePolicy', PolicyArn: policyArn })
+      } catch (e) {
+        errors.push(e as Error)
+      }
+    }
+
+    if (accessKeyId) {
+      try {
+        await this.iamAction({ Action: 'DeleteAccessKey', AccessKeyId: accessKeyId, UserName: accessKeyId })
+      } catch (e) {
+        errors.push(e as Error)
+      }
+    }
+
+    // --- S3 bucket DELETE (always attempted) ---
+    const s3Res = await this.s3(`${this.s3Endpoint}/${bucket}`, { method: 'DELETE' })
+    if (s3Res.status < 200 || s3Res.status >= 300) {
+      errors.push(new Error(`tigris DELETE /${bucket} failed: ${s3Res.status}`))
+    }
+
+    if (errors.length > 0) {
+      throw new Error(`tigris destroy had ${errors.length} failure(s): ${errors.map(e => e.message).join('; ')}`)
+    }
   }
 
   async createBranch(_handle: ResourceHandle, _name: string, _parentRef?: string): Promise<string | null> { return null }
@@ -48,28 +110,43 @@ export class TigrisAdapter implements ProviderAdapter {
 
   async mintCredentials(handle: ResourceHandle): Promise<SecretBundle> {
     const ref = handle.providerRef as TigrisRef
-    // [VERIFY-LIVE] Create a bucket-scoped access key via Tigris IAM. Confirm the exact
-    // action/payload + response field names against the live API and adjust here only.
-    const policy = {
+
+    // 1. CreateAccessKey — returns a standalone key (no UserName needed)
+    const createKeyXml = await this.iamAction({ Action: 'CreateAccessKey' })
+    const accessKeyId = xmlField(createKeyXml, 'AccessKeyId')
+    const secretAccessKey = xmlField(createKeyXml, 'SecretAccessKey')
+    if (!accessKeyId || !secretAccessKey) {
+      throw new Error('tigris CreateAccessKey response missing AccessKeyId or SecretAccessKey')
+    }
+
+    // 2. CreatePolicy — scoped to this bucket
+    const policyDocument = JSON.stringify({
       Version: '2012-10-17',
       Statement: [
         { Effect: 'Allow', Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'], Resource: [`arn:aws:s3:::${ref.bucket}/*`] },
         { Effect: 'Allow', Action: ['s3:ListBucket'], Resource: [`arn:aws:s3:::${ref.bucket}`] },
       ],
-    }
-    const res = await this.iam(`${this.iamEndpoint}/v1/access-keys`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: `firth-${ref.bucket}`, policy }),
     })
-    if (res.status < 200 || res.status >= 300) throw new Error(`tigris create access-key failed: ${res.status}`)
-    const data = await res.json()
-    const id = data.access_key_id ?? data.AccessKeyId
-    const secret = data.secret_access_key ?? data.SecretAccessKey
-    if (!id || !secret) throw new Error('tigris access-key response missing credentials')
+    const createPolicyXml = await this.iamAction({
+      Action: 'CreatePolicy',
+      PolicyName: `firth-${ref.bucket}`,
+      PolicyDocument: policyDocument,
+    })
+    const policyArn = xmlField(createPolicyXml, 'Arn')
+    if (!policyArn) {
+      throw new Error('tigris CreatePolicy response missing Arn')
+    }
+
+    // 3. AttachUserPolicy — bind the policy to the key (key id is the UserName)
+    await this.iamAction({ Action: 'AttachUserPolicy', UserName: accessKeyId, PolicyArn: policyArn })
+
+    // Persist the minted handles back into providerRef so destroy can clean up
+    ref.accessKeyId = accessKeyId
+    ref.policyArn = policyArn
+
     return {
-      AWS_ACCESS_KEY_ID: id,
-      AWS_SECRET_ACCESS_KEY: secret,
+      AWS_ACCESS_KEY_ID: accessKeyId,
+      AWS_SECRET_ACCESS_KEY: secretAccessKey,
       AWS_ENDPOINT_URL_S3: ref.endpoint,
       BUCKET_NAME: ref.bucket,
       AWS_REGION: ref.region,

@@ -64,6 +64,13 @@ export class ProvisioningService {
           // S3 buckets and Fly apps are project-scoped (branch_id null): the bucket is shared
           // across branches, and Fly mints no credentials at all.
           const bundle = await adapter.mintCredentials(handle)
+
+          // Re-persist providerRef: mintCredentials may have enriched it with minted handles
+          // (e.g. TigrisAdapter adds accessKeyId + policyArn). Generic — harmless for adapters
+          // whose mint does not mutate the handle.
+          const repersist = await this.db.from('resources').update({ provider_ref: handle.providerRef }).eq('id', resourceId)
+          if (repersist.error) throw repersist.error
+
           for (const [key, value] of Object.entries(bundle)) {
             const enc = encryptSecret(value, this.cfg.keks, this.cfg.currentKek)
             const sec = await this.db.from('secrets').insert({
