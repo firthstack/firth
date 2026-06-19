@@ -1,31 +1,23 @@
 # Firth — Architecture & Design Decisions
 
-The *why* and *how* behind Firth: what we're building, the decisions already locked, and what's deliberately out of scope. Written for contributors and for agents reading this repo. For the strategic framing see [README.md](./README.md); for the full design spec and implementation plan see [`docs/superpowers/`](./docs/superpowers/).
+The *why* and *how* behind Firth: what we're building, the decisions already locked, and what's deliberately out of scope. Written for contributors and for agents reading this repo. For the product overview see [README.md](./README.md); for the full design specs and implementation plans see [`docs/superpowers/`](./docs/superpowers/).
 
 ---
 
-## 1. What we're building — and what we killed
+## 1. What we're building
 
-Firth is a **builder platform / agent-action control plane**: developers and their agents create projects that orchestrate third-party resources, with secrets, observability, and failure analysis layered on top as the high-value surface.
+Firth is a **builder platform / agent-action control plane**: developers and their agents create projects that orchestrate third-party resources (DB, storage, compute) under Firth's own provider accounts, with a unified secret seam, observability, and failure analysis layered on top.
 
-An earlier direction is **explicitly dead**: an "operational knowledge layer" that helped vibe coders + agents pick a stack, scaffold, deploy, and manage keys. It was killed by a three-way squeeze:
-
-1. **Agents now self-select stacks and operate platforms** — the knowledge gap it sold into closed.
-2. **Platforms verticalized into full-stack** (Cloudflare / Vercel / Railway) — the integration gap closed.
-3. **Stripe Projects ate provision + credentials + billing** (a public catalog of dozens of providers, with provider skills auto-injected into the agent's context).
-
-The lesson, and the principle that now governs every decision: **anything that is "knowledge" is not a moat — the agent already has it, or a connector injects it. Firth sells trust/control, which commoditization *strengthens* rather than erodes.**
-
-Principles that survived the pivot and still hold: orchestrate providers, don't be a PaaS; emit agent-consumable output; one unified secrets boundary; agent-aware error handling; project state an agent can always read back.
+Engineering principles that govern the design: orchestrate providers, don't be a PaaS; emit agent-consumable output; one unified secrets boundary; agent-aware error handling; project state an agent can always read back.
 
 ## 2. Locked decisions
 
 | Decision | Value | Consequence |
 |---|---|---|
-| **Role** | Orchestrator, not reseller | Resource cost passed through; profit = integration + governance. Keeps Firth a neutral judge, not a "sell more" vendor. |
-| **Account-of-record** | Firth provisions under its own Neon / S3 / Fly keys | Every resource credential flows through Firth **by construction** → the enforcement chokepoint is structural, not bolted on. |
+| **Role** | Orchestrator, not reseller | Resource cost is passed through; Firth does not mark up resources. |
+| **Account-of-record** | Firth provisions under its own Neon / S3 / Fly keys | Every resource credential flows through Firth **by construction** → the credential path is structural, not bolted on. |
 | **Resources** | Neon (DB) · S3 (storage) · Fly.io (compute) | — |
-| **Hosting** | Managed SaaS | The resource layer can't be self-hosted (provider accounts + secrets live on Firth's side); trust is earned via governance auditability + compliance, not self-hosting. |
+| **Hosting** | Managed SaaS | The resource layer can't be self-hosted (provider accounts + secrets live on Firth's side). |
 | **Credential path** | Provisioning-centric + env injection now, behind a **secret seam** | Ships fast; the seam lets us upgrade to runtime credential brokering later without rewriting apps. |
 | **Branching** | DB native; storage shared; compute per-branch (isolated Fly app) | See §8. |
 | **Backend** | [InsForge](https://insforge.dev) | See §4. |
@@ -138,7 +130,7 @@ Two event streams keyed by `(project, branch)`, correlated into one timeline:
 - **Agent actions** — from the `observe/` hook (what the agent did: files edited, commands run, credentials touched) → control-plane ingest.
 - **Resource side-effects** — deploys, migrations, provisioning, usage, provider logs.
 
-The unit is "agent action ↔ resource side-effect" (e.g. *agent issued a refund → which rows changed → which credential was used*) — deliberately **not** the prompt/token/trace unit that dev-time agent-observability tools (LangSmith, Langfuse, ...) track. Failure analysis is a triage layer on top of this timeline (v1 collects the data; triage logic comes later). This is the agent-aware "what state is this project in / what just broke" surface, evolved from the old handoff idea.
+The unit is "agent action ↔ resource side-effect" (e.g. *agent issued a refund → which rows changed → which credential was used*) — deliberately **not** the prompt/token/trace unit that dev-time agent-observability tools (LangSmith, Langfuse, ...) track. Failure analysis is a triage layer on top of this timeline (v1 collects the data; triage logic comes later). This is the agent-aware "what state is this project in / what just broke" surface.
 
 ## 11. Security
 
@@ -157,4 +149,4 @@ The unit is "agent action ↔ resource side-effect" (e.g. *agent issued a refund
 
 ## 13. Naming
 
-**Firth** — Scottish for a narrow inlet where a river meets the sea: the builder's work is the river, the cloud is the sea, Firth is the channel that carries it out — and now the channel every credential and action flows through. (Rejected, for posterity: `vibe`, `agent.stack`, `rig`, `keel`, `kindo` — collisions on npm/crates/existing products. `firth` was first clean across npm, pypi, and crates.io.)
+**Firth** — Scottish for a narrow inlet where a river meets the sea: the builder's work is the river, the cloud is the sea, Firth is the channel that carries it out. (Rejected, for posterity: `vibe`, `agent.stack`, `rig`, `keel`, `kindo` — collisions on npm/crates/existing products. `firth` was first clean across npm, pypi, and crates.io.)
