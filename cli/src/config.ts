@@ -20,9 +20,19 @@ export function writeConfig(cfg: CliConfig, home = homedir()): void {
   writeFileSync(gpath(home), JSON.stringify(cfg, null, 2))
 }
 
-export function readProjectLink(cwd = process.cwd()): { projectId: string; branch?: { id: string; name: string } } | null {
+export type ProjectLink = { projectId: string; branch?: { id: string; name: string }; skillsInstalled?: boolean }
+
+export function readProjectLink(cwd = process.cwd()): ProjectLink | null {
   const p = lpath(cwd)
   return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : null
+}
+
+// One-time marker so related-skill installation runs once per linked project, not on every command.
+export function markSkillsInstalled(cwd = process.cwd()): void {
+  const link = readProjectLink(cwd)
+  if (!link) return
+  link.skillsInstalled = true
+  writeFileSync(lpath(cwd), JSON.stringify(link, null, 2))
 }
 
 export function writeProjectLink(projectId: string, cwd = process.cwd()): void {

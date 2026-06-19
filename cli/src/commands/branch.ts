@@ -5,6 +5,7 @@ import { formatTeardown } from './util.js'
 import type { CliDeps } from '../index.js'
 import type { FirthApi } from '../api.js'
 import { ensureFlyctl } from '../fly.js'
+import { ensureSkills } from '../ensure-skills.js'
 
 function linkedProject(deps: CliDeps): string {
   const link = readProjectLink(deps.cwd)
@@ -55,6 +56,7 @@ export async function branchSwitch(argv: string[], deps: CliDeps & { makeApi?: (
     }
     setCurrentBranch({ id: target.id, name: target.name }, deps.cwd)
     deps.print(`switched to branch ${target.name} (${target.id}) — run \`firth secrets\` to refresh .env`)
+    await ensureSkills(deps)
     return 0
   } catch (e) {
     deps.print(`error: ${e instanceof Error ? e.message : String(e)}`)
