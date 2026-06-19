@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { homedir } from 'node:os'
 import { login, logout } from './commands/auth.js'
-import { projectCreate, projectLink, projectList } from './commands/project.js'
-import { branchCreate, branchList } from './commands/branch.js'
+import { projectCreate, projectLink, projectList, projectDelete } from './commands/project.js'
+import { branchCreate, branchList, branchSwitch, branchDelete } from './commands/branch.js'
 import { secrets } from './commands/secrets.js'
 import { skillsPull } from './commands/skills.js'
 import { deploy } from './commands/deploy.js'
 import { events } from './commands/events.js'
 import { observeSync } from './commands/observe.js'
+import { status } from './commands/status.js'
 
 export type CliDeps = {
   print: (s: string) => void
@@ -31,6 +32,10 @@ Commands:
   deploy                    Deploy --image <url> to the project's compute (--from, --port)
   events                    Show the project's action↔side-effect timeline (--branch, --limit)
   observe sync              Upload local observe-hook findings (.firth/audit.jsonl) to the timeline
+  status                    Show login, linked project, and current branch
+  project delete            Delete the linked project + all resources (--yes)
+  branch switch <name>      Set the current branch (secrets/events default to it)
+  branch delete <name>      Delete a branch + its Neon branch (--yes)
   --help                    Show this help`
 
 // Command handlers registered by later tasks. Each: (argv, deps) => Promise<number>.
@@ -48,6 +53,10 @@ COMMANDS['skills pull'] = skillsPull
 COMMANDS['deploy'] = deploy
 COMMANDS['events'] = events
 COMMANDS['observe sync'] = observeSync
+COMMANDS['branch switch'] = branchSwitch
+COMMANDS['branch delete'] = branchDelete
+COMMANDS['project delete'] = projectDelete
+COMMANDS['status'] = status
 
 export async function route(argv: string[], deps: CliDeps): Promise<number> {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
