@@ -32,7 +32,7 @@ function readVersion(): string {
 const USAGE = `firth <command>
 
 Commands:
-  login                     Sign in (email/password)
+  login                     Sign in (--email, --password; --api-url <url> sets the control-plane host)
   logout                    Clear stored credentials
   project create <name>     Create + link a project
   project link <id>         Link this directory to a project

@@ -31,6 +31,18 @@ test('login calls api with creds and stores the token', async () => {
   expect(d.out.join('\n')).not.toContain('tok-1')
 })
 
+test('login --api-url sets and persists the control-plane host', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'firth-'))
+  const api = { login: async (email: string) => ({ token: 'tok-1', user: { id: 'u1', email } }) }
+  const d = deps(home, api)
+  const code = await login(['--api-url', 'https://api.firth.dev'], d as any)
+  expect(code).toBe(0)
+  const cfg = readConfig(home, {})
+  expect(cfg.apiUrl).toBe('https://api.firth.dev')
+  expect(cfg.token).toBe('tok-1')
+  expect(d.out.join('\n')).toMatch(/control plane: https:\/\/api\.firth\.dev/)
+})
+
 test('login fails cleanly when the api throws', async () => {
   const home = mkdtempSync(join(tmpdir(), 'firth-'))
   const api = { login: async () => { throw new Error('invalid credentials') } }
