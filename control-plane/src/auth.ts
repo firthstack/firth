@@ -6,6 +6,10 @@ export class NotFoundError extends Error {
   constructor(msg = 'not found') { super(msg); this.name = 'NotFoundError' }
 }
 
+export class ConflictError extends Error {
+  constructor(msg = 'conflict') { super(msg); this.name = 'ConflictError' }
+}
+
 export async function resolveUid(
   authHeader: string | undefined,
   verify: (token: string) => Promise<{ id: string } | null>,

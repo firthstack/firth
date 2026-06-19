@@ -251,3 +251,30 @@ test('GET /projects/:id for an unknown project → 404', async () => {
   expect(res.statusCode).toBe(404)
   expect(res.json().error).toBe('project not found')
 })
+
+test('DELETE /projects/:id → 200 with teardown summary', async () => {
+  const db = fakeData()
+  const project = (await db.from('projects').insert({ owner: 'uid-1', name: 'a', status: 'active' }).then((r: any) => r)).data[0]
+  await db.from('resources').insert({ owner: 'uid-1', project_id: project.id, kind: 'neon', provider_ref: {}, status: 'active' })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const res = await app.inject({ method: 'DELETE', url: `/projects/${project.id}`, headers: { authorization: 'Bearer good' } })
+  expect(res.statusCode).toBe(200)
+  expect(res.json().teardown.destroyed).toEqual(['neon'])
+  expect(db.tables.projects.find((r: any) => r.id === project.id).archived_at).toBeTruthy()
+})
+
+test('DELETE default branch → 409', async () => {
+  const db = fakeData()
+  const main = (await db.from('branches').insert({ project_id: 'p1', owner: 'uid-1', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' }).then((r: any) => r)).data[0]
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const res = await app.inject({ method: 'DELETE', url: `/projects/p1/branches/${main.id}`, headers: { authorization: 'Bearer good' } })
+  expect(res.statusCode).toBe(409)
+  expect(res.json().error).toBe('cannot delete the default branch')
+})
+
+test('DELETE a missing project → 404', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const res = await app.inject({ method: 'DELETE', url: '/projects/nope', headers: { authorization: 'Bearer good' } })
+  expect(res.statusCode).toBe(404)
+})

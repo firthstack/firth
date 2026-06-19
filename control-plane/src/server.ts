@@ -1,12 +1,13 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { FirthConfig } from './config.js'
-import { resolveUid, UnauthorizedError, NotFoundError } from './auth.js'
+import { resolveUid, UnauthorizedError, NotFoundError, ConflictError } from './auth.js'
 import type { DataClient } from './db/types.js'
 import { ProjectsRepo, SecretsRepo, BranchesRepo, ResourcesRepo, EventsRepo } from './db/repos.js'
 import { decryptSecret } from './crypto/secrets.js'
 import { ProvisioningService } from './services/provisioning.js'
 import { BranchService } from './services/branches.js'
 import { DeployService } from './services/deploy.js'
+import { TeardownService } from './services/teardown.js'
 import { publicResourceView } from './services/resource-view.js'
 import type { ProviderAdapter } from './adapters/types.js'
 
@@ -24,6 +25,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     // Static strings only — never echo err.message/stack (they may carry tokens or secrets).
     if (err instanceof UnauthorizedError) return reply.code(401).send({ error: 'unauthorized' })
     if (err instanceof NotFoundError) return reply.code(404).send({ error: err.message })
+    if (err instanceof ConflictError) return reply.code(409).send({ error: err.message })
     return reply.code(500).send({ error: 'internal error' })
   })
 
@@ -62,6 +64,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const branches = await new BranchesRepo(db).listByProject(uid, projectId)
     const resources = (await new ResourcesRepo(db).listByProject(uid, projectId)).map(publicResourceView)
     return reply.send({ project, branches, resources })
+  })
+
+  app.delete('/projects/:id', async (req, reply) => {
+    const { uid, token, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
+    const out = await new TeardownService(db, deps.cfg, adapters).deleteProject(uid, projectId)
+    await emit(db, uid, projectId, null, 'project.delete', { teardown: out.teardown })
+    return reply.send(out)
+  })
+
+  app.delete('/projects/:id/branches/:bid', async (req, reply) => {
+    const { uid, token, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const branchId = (req.params as any).bid
+    const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
+    const out = await new TeardownService(db, deps.cfg, adapters).deleteBranch(uid, projectId, branchId)
+    await emit(db, uid, projectId, branchId, 'branch.delete', { name: out.branch.name, teardown: out.teardown })
+    return reply.send(out)
   })
 
   app.post('/projects/:id/branches', async (req, reply) => {
