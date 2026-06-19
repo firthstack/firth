@@ -61,6 +61,23 @@ body {
 }
 .firth-error { color: var(--red); }
 .firth-dim { color: var(--fg-dim); }
+
+/* CliHint — copyable `$ command` line */
+.firth-clihint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  flex-wrap: wrap;
+}
+.firth-clihint__prompt { user-select: none; }
+.firth-clihint__cmd {
+  color: var(--green);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.firth-clihint__note { flex: 1; min-width: 0; }
+.firth-clihint__copy { flex-shrink: 0; }
 .firth-confirm {
   border: 1px solid var(--red);
   background: var(--bg-panel);
@@ -86,3 +103,5 @@ body {
 .firth-home__features { border-collapse: collapse; margin-top: 0.25rem; }
 .firth-home__features td { padding: 0.1rem 0.75rem 0.1rem 0; vertical-align: top; }
 .firth-home__feat-name { color: var(--fg); white-space: nowrap; }
+.firth-home__hint { margin: 0.5rem 0 0; }
+.firth-home__hint code { color: var(--green); }

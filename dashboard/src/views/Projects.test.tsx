@@ -49,6 +49,12 @@ describe('Projects', () => {
     expect(deleteProject).toHaveBeenCalledWith('p1')
   })
 
+  it('shows the firth project create cli hint', async () => {
+    render(<Projects api={fakeApi()} onOpen={vi.fn()} />)
+    await screen.findByText('alpha')
+    expect(screen.getByText('firth project create <name>')).toBeInTheDocument()
+  })
+
   it('opening a project calls onOpen with its id', async () => {
     const onOpen = vi.fn()
     const api = fakeApi()

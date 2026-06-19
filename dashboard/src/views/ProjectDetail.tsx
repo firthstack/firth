@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Panel, Row, TButton, TInput, Confirm } from '../ui/Terminal'
+import { Panel, Row, TButton, TInput, Confirm, CliHint } from '../ui/Terminal'
 import type { Api } from '../api/client'
 import type { ProjectDetail as Detail, Resource } from '../types'
 
@@ -237,6 +237,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
         <span>{detail?.project.name ?? projectId}</span>
         <span className="firth-dim">{detail?.project.status ?? ''}</span>
       </Row>
+      <CliHint command={`firth project link ${projectId}`} note="# link this directory to the project" />
       {loading && <p className="firth-dim">loading...</p>}
       {error && <p className="firth-error">! {error}</p>}
       {detail && (
@@ -246,6 +247,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
           <ComputeCard resource={flyResource} />
           <Panel title="branches">
             <Row><TButton onClick={() => setCreating((c) => !c)}>[+ create branch]</TButton></Row>
+            <CliHint command="firth branch create <name>" note="# or from the cli — forks an isolated db branch" />
             {creating && (
               <Row>
                 <label htmlFor="branch-name">name</label>

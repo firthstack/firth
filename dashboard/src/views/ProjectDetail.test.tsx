@@ -80,6 +80,19 @@ describe('ProjectDetail', () => {
     expect(activeEls.length).toBeGreaterThan(0)
   })
 
+  // ---- cli hints -----------------------------------------------------------
+
+  it('shows the firth project link cli hint with the project id', async () => {
+    render(<ProjectDetail api={fakeApi()} projectId="p1" onBack={vi.fn()} />)
+    expect(await screen.findByText('firth project link p1')).toBeInTheDocument()
+  })
+
+  it('shows the firth branch create cli hint', async () => {
+    render(<ProjectDetail api={fakeApi()} projectId="p1" onBack={vi.fn()} />)
+    await screen.findByText('main')
+    expect(screen.getByText('firth branch create <name>')).toBeInTheDocument()
+  })
+
   // ---- branch actions ------------------------------------------------------
 
   it('deleting a non-default branch calls deleteBranch', async () => {

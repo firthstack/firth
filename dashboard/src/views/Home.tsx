@@ -51,6 +51,29 @@ export function Home({ onGetStarted }: { onGetStarted: () => void }) {
               </tbody>
             </table>
           </div>
+
+          <div className="firth-home__block">
+            <span className="firth-dim">$ firth --install</span>
+            <table className="firth-home__features">
+              <tbody>
+                <tr>
+                  <td className="firth-home__feat-name">npm install -g firth</td>
+                  <td className="firth-dim"># the cli · requires node ≥ 20</td>
+                </tr>
+                <tr>
+                  <td className="firth-home__feat-name">firth login</td>
+                  <td className="firth-dim"># sign in (email / password)</td>
+                </tr>
+                <tr>
+                  <td className="firth-home__feat-name">firth project create my-app</td>
+                  <td className="firth-dim"># provision db · storage · compute → ./.env</td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="firth-dim firth-home__hint">
+              no install? <code>npx firth --help</code>. docs: <code>firth &lt;cmd&gt; --help</code>
+            </p>
+          </div>
         </div>
       </Panel>
 

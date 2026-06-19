@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Panel, Row, TButton, TInput, Confirm } from '../ui/Terminal'
+import { Panel, Row, TButton, TInput, Confirm, CliHint } from '../ui/Terminal'
 import type { Api } from '../api/client'
 import type { Project } from '../types'
 
@@ -38,6 +38,7 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
       <Row>
         <TButton onClick={() => setCreating((c) => !c)}>[+ create]</TButton>
       </Row>
+      <CliHint command="firth project create <name>" note="# or from the cli — provisions db · storage · compute" />
       {creating && (
         <Row>
           <label htmlFor="new-project-name">name</label>

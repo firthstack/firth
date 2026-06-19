@@ -20,6 +20,12 @@ describe('Home', () => {
     expect(screen.getByText(/unified secrets/i)).toBeInTheDocument()
   })
 
+  it('shows how to install the firth cli', () => {
+    render(<Home onGetStarted={vi.fn()} />)
+    expect(screen.getByText('$ firth --install')).toBeInTheDocument()
+    expect(screen.getByText('npm install -g firth')).toBeInTheDocument()
+  })
+
   it('clicking get started calls onGetStarted', async () => {
     const onGetStarted = vi.fn()
     render(<Home onGetStarted={onGetStarted} />)
