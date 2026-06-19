@@ -93,7 +93,49 @@ export class TigrisAdapter implements ProviderAdapter {
       }
     }
 
-    // --- S3 bucket DELETE (always attempted) ---
+    // --- S3 bucket empty + DELETE (always attempted) ---
+    try {
+      // List and delete all objects before deleting the bucket (S3/Tigris returns 409 on non-empty)
+      let continuationToken: string | undefined
+      do {
+        const listUrl = continuationToken
+          ? `${this.s3Endpoint}/${bucket}?list-type=2&continuation-token=${encodeURIComponent(continuationToken)}`
+          : `${this.s3Endpoint}/${bucket}?list-type=2`
+        const listRes = await this.s3(listUrl, { method: 'GET' })
+        if (listRes.status < 200 || listRes.status >= 300) {
+          throw new Error(`tigris ListObjectsV2 /${bucket} failed: ${listRes.status}`)
+        }
+        const listXml = await listRes.text()
+
+        // Extract all object keys from this page
+        const keys: string[] = []
+        const keyRegex = /<Key>([^<]+)<\/Key>/g
+        let m: RegExpExecArray | null
+        while ((m = keyRegex.exec(listXml)) !== null) {
+          keys.push(m[1])
+        }
+
+        // Delete each object
+        for (const key of keys) {
+          const encodedKey = key.split('/').map(encodeURIComponent).join('/')
+          const delRes = await this.s3(`${this.s3Endpoint}/${bucket}/${encodedKey}`, { method: 'DELETE' })
+          if (delRes.status < 200 || delRes.status >= 300) {
+            throw new Error(`tigris DELETE /${bucket}/${encodedKey} failed: ${delRes.status}`)
+          }
+        }
+
+        // Check if there are more pages
+        const truncated = /<IsTruncated>true<\/IsTruncated>/.test(listXml)
+        if (truncated) {
+          continuationToken = listXml.match(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/)?.[1]
+        } else {
+          continuationToken = undefined
+        }
+      } while (continuationToken !== undefined)
+    } catch (e) {
+      errors.push(e as Error)
+    }
+
     const s3Res = await this.s3(`${this.s3Endpoint}/${bucket}`, { method: 'DELETE' })
     if (s3Res.status < 200 || s3Res.status >= 300) {
       errors.push(new Error(`tigris DELETE /${bucket} failed: ${s3Res.status}`))

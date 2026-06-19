@@ -2,13 +2,17 @@ import { describe, expect, test } from 'vitest'
 import { TigrisAdapter } from '../../src/adapters/tigris.js'
 import type { SignedHttp } from '../../src/adapters/signed-http.js'
 
-function fake(routes: Array<{ match: (u: string, i: any) => boolean; status?: number; body?: any }>) {
+const EMPTY_LIST_XML = `<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>`
+const ONE_OBJECT_LIST_XML = `<ListBucketResult><Contents><Key>some/object.txt</Key></Contents><IsTruncated>false</IsTruncated></ListBucketResult>`
+
+function fake(routes: Array<{ match: (u: string, i: any) => boolean; status?: number; body?: any; text?: string }>) {
   const calls: Array<{ url: string; init: any }> = []
   const http: SignedHttp = async (url, init) => {
     calls.push({ url, init })
     const r = routes.find((x) => x.match(url, init))
     if (!r) throw new Error(`unexpected: ${init.method} ${url}`)
-    return { status: r.status ?? 200, json: async () => r.body ?? {}, text: async () => '' }
+    const textVal = r.text ?? ''
+    return { status: r.status ?? 200, json: async () => r.body ?? {}, text: async () => textVal }
   }
   return { http, calls }
 }
@@ -55,13 +59,19 @@ describe('TigrisAdapter provision/destroy', () => {
     expect(JSON.stringify(handle.providerRef)).not.toMatch(/secret|key/i)
   })
 
-  test('destroy DELETEs the bucket (no accessKeyId — bucket-only teardown)', async () => {
-    const { http, calls } = fake([{ match: (u, i) => i.method === 'DELETE', status: 204 }])
+  test('destroy DELETEs the bucket (no accessKeyId — bucket-only teardown, empty bucket)', async () => {
+    const { http, calls } = fake([
+      { match: (u, i) => i.method === 'GET' && u.includes('list-type=2'), status: 200, text: EMPTY_LIST_XML },
+      { match: (u, i) => i.method === 'DELETE', status: 204 },
+    ])
     const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
     const adapter = new TigrisAdapter(http, noop)
     await adapter.destroy({ kind: 's3', providerRef: { bucket: 'firth-x-abc', endpoint: 'https://t3.storage.dev', region: 'auto' } })
-    expect(calls[0].init.method).toBe('DELETE')
-    expect(calls[0].url).toContain('firth-x-abc')
+    // First call should be the list, last should be bucket DELETE
+    expect(calls[0].init.method).toBe('GET')
+    expect(calls[0].url).toContain('list-type=2')
+    expect(calls[calls.length - 1].init.method).toBe('DELETE')
+    expect(calls[calls.length - 1].url).toMatch(/firth-x-abc$/)
   })
 
   test('non-2xx on provision throws with status', async () => {
@@ -126,12 +136,16 @@ describe('TigrisAdapter.mintCredentials', () => {
 })
 
 describe('TigrisAdapter.destroy (with minted handles)', () => {
-  test('destroy with accessKeyId+policyArn issues DetachUserPolicy + DeletePolicy + DeleteAccessKey + bucket DELETE', async () => {
+  test('destroy with accessKeyId+policyArn issues DetachUserPolicy + DeletePolicy + DeleteAccessKey + lists objects + object DELETE + bucket DELETE', async () => {
     const bucket = 'firth-x-abc'
     const { iam, calls: iamCalls } = fakeIam(bucket)
     const s3Calls: any[] = []
     const s3: SignedHttp = async (url, init) => {
       s3Calls.push({ url, init })
+      // list returns one object
+      if (init.method === 'GET' && url.includes('list-type=2')) {
+        return { status: 200, json: async () => ({}), text: async () => ONE_OBJECT_LIST_XML }
+      }
       return { status: 204, json: async () => ({}), text: async () => '' }
     }
     const adapter = new TigrisAdapter(s3, iam)
@@ -151,13 +165,24 @@ describe('TigrisAdapter.destroy (with minted handles)', () => {
     // IAM teardown sequence
     expect(iamCalls.map(c => c.action)).toEqual(['DetachUserPolicy', 'DeletePolicy', 'DeleteAccessKey'])
 
-    // Bucket DELETE
-    expect(s3Calls.length).toBe(1)
-    expect(s3Calls[0].init.method).toBe('DELETE')
+    // S3 sequence: (a) list, (b) object delete, (c) bucket delete
+    expect(s3Calls.length).toBe(3)
+
+    // (a) list objects
+    expect(s3Calls[0].init.method).toBe('GET')
+    expect(s3Calls[0].url).toContain('list-type=2')
     expect(s3Calls[0].url).toContain(bucket)
+
+    // (b) delete the object — key is some/object.txt, slash preserved, each segment percent-encoded
+    expect(s3Calls[1].init.method).toBe('DELETE')
+    expect(s3Calls[1].url).toContain(`${bucket}/some/object.txt`)
+
+    // (c) delete the bucket itself
+    expect(s3Calls[2].init.method).toBe('DELETE')
+    expect(s3Calls[2].url).toMatch(new RegExp(`${bucket}$`))
   })
 
-  test('destroy with no accessKeyId/policyArn still deletes the bucket and does not throw', async () => {
+  test('destroy with no accessKeyId/policyArn still lists+deletes bucket (empty list) and does not throw', async () => {
     const bucket = 'firth-no-mint'
     const iamCalls: any[] = []
     const iam: SignedHttp = async (url, init) => {
@@ -167,6 +192,9 @@ describe('TigrisAdapter.destroy (with minted handles)', () => {
     const s3Calls: any[] = []
     const s3: SignedHttp = async (url, init) => {
       s3Calls.push({ url, init })
+      if (init.method === 'GET' && url.includes('list-type=2')) {
+        return { status: 200, json: async () => ({}), text: async () => EMPTY_LIST_XML }
+      }
       return { status: 204, json: async () => ({}), text: async () => '' }
     }
     const adapter = new TigrisAdapter(s3, iam)
@@ -180,10 +208,12 @@ describe('TigrisAdapter.destroy (with minted handles)', () => {
     // No IAM calls (nothing to detach/delete)
     expect(iamCalls.length).toBe(0)
 
-    // Bucket still deleted
-    expect(s3Calls.length).toBe(1)
-    expect(s3Calls[0].init.method).toBe('DELETE')
-    expect(s3Calls[0].url).toContain(bucket)
+    // S3: list + bucket DELETE (no object deletes — empty bucket)
+    expect(s3Calls.length).toBe(2)
+    expect(s3Calls[0].init.method).toBe('GET')
+    expect(s3Calls[0].url).toContain('list-type=2')
+    expect(s3Calls[1].init.method).toBe('DELETE')
+    expect(s3Calls[1].url).toContain(bucket)
   })
 
   test('destroy collects all step failures and throws aggregated error', async () => {
@@ -193,7 +223,12 @@ describe('TigrisAdapter.destroy (with minted handles)', () => {
       iamCallCount++
       return { status: 500, json: async () => ({}), text: async () => '<Error/>' }
     }
-    const s3: SignedHttp = async () => ({ status: 204, json: async () => ({}), text: async () => '' })
+    const s3: SignedHttp = async (url, init) => {
+      if (init.method === 'GET' && url.includes('list-type=2')) {
+        return { status: 200, json: async () => ({}), text: async () => EMPTY_LIST_XML }
+      }
+      return { status: 204, json: async () => ({}), text: async () => '' }
+    }
     const adapter = new TigrisAdapter(s3, iam)
     const handle = {
       kind: 's3' as const,

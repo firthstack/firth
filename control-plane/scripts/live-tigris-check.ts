@@ -46,14 +46,46 @@ async function main() {
     console.log(`GET own bucket (${ownBucket}) → status ${getOwnRes.status}`, getOwnRes.status >= 200 && getOwnRes.status < 300 ? 'PASS' : 'FAIL')
 
     // PUT to a DIFFERENT bucket — expect 403 / AccessDenied
-    const otherBucket = `firth-scope-other-${Date.now()}`
-    const putOtherRes = await mintedS3(`${creds.AWS_ENDPOINT_URL_S3}/${otherBucket}/${testKey}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'text/plain' },
-      body: 'should-be-denied',
-    })
-    const crossBucketDenied = putOtherRes.status === 403 || putOtherRes.status === 401
-    console.log(`PUT cross-bucket (${otherBucket}) → status ${putOtherRes.status}`, crossBucketDenied ? 'PASS (denied as expected)' : 'FAIL (expected 403/AccessDenied)')
+    // We create a real second bucket with the admin signer so a non-existent bucket cannot mask a scoping failure.
+    const otherBucket = `firth-scope-other-${process.env.LIVE_TAG ?? Date.now()}`
+    console.log(`creating second bucket "${otherBucket}" with admin signer for cross-bucket denial test ...`)
+    const createOtherRes = await s3(`${creds.AWS_ENDPOINT_URL_S3}/${otherBucket}`, { method: 'PUT' })
+    if (createOtherRes.status < 200 || createOtherRes.status >= 300) {
+      console.log(`SKIP cross-bucket denial test: could not create other bucket (status ${createOtherRes.status})`)
+    } else {
+      try {
+        const putOtherRes = await mintedS3(`${creds.AWS_ENDPOINT_URL_S3}/${otherBucket}/${testKey}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'text/plain' },
+          body: 'should-be-denied',
+        })
+        if (putOtherRes.status === 403 || putOtherRes.status === 401) {
+          console.log(`PUT cross-bucket (${otherBucket}) → status ${putOtherRes.status} PASS (denied as expected)`)
+        } else if (putOtherRes.status >= 200 && putOtherRes.status < 300) {
+          console.log(`PUT cross-bucket (${otherBucket}) → status ${putOtherRes.status} FAIL (scoped key wrote to another bucket — scoping is broken!)`)
+        } else {
+          console.log(`PUT cross-bucket (${otherBucket}) → status ${putOtherRes.status} FAIL (unexpected status — expected 403)`)
+        }
+      } finally {
+        // Empty and delete the other bucket with the admin signer
+        try {
+          const listRes = await s3(`${creds.AWS_ENDPOINT_URL_S3}/${otherBucket}?list-type=2`, { method: 'GET' })
+          if (listRes.status >= 200 && listRes.status < 300) {
+            const listXml = await listRes.text()
+            const keyRegex = /<Key>([^<]+)<\/Key>/g
+            let km: RegExpExecArray | null
+            while ((km = keyRegex.exec(listXml)) !== null) {
+              const encodedKey = km[1].split('/').map(encodeURIComponent).join('/')
+              await s3(`${creds.AWS_ENDPOINT_URL_S3}/${otherBucket}/${encodedKey}`, { method: 'DELETE' })
+            }
+          }
+          await s3(`${creds.AWS_ENDPOINT_URL_S3}/${otherBucket}`, { method: 'DELETE' })
+          console.log(`deleted other bucket "${otherBucket}" (cleanup) ✓`)
+        } catch (cleanupErr: any) {
+          console.log(`warning: could not clean up other bucket "${otherBucket}": ${cleanupErr.message}`)
+        }
+      }
+    }
   } finally {
     await adapter.destroy(handle)
     console.log('destroyed key + policy + bucket (cleanup) ✓')
