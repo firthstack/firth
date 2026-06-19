@@ -181,3 +181,19 @@ describe('ResourcesRepo listByProject/markStatus', () => {
     expect(updated.status).toBe('destroyed')
   })
 })
+
+describe('ResourcesRepo.findByKindForBranch', () => {
+  test('returns the fly row for a given branch and null for another branch', async () => {
+    const db = fakeDb({ resources: [
+      { id: 'r-a', owner: 'o', project_id: 'p', kind: 'fly', branch_id: 'b-main', provider_ref: { flyApp: 'a-main' }, status: 'active' },
+      { id: 'r-b', owner: 'o', project_id: 'p', kind: 'fly', branch_id: 'b-feat', provider_ref: { flyApp: 'a-feat' }, status: 'active' },
+    ] })
+    const repo = new ResourcesRepo(db as any)
+    const main = await repo.findByKindForBranch('o', 'p', 'b-main', 'fly')
+    expect(main?.id).toBe('r-a')
+    const feat = await repo.findByKindForBranch('o', 'p', 'b-feat', 'fly')
+    expect(feat?.id).toBe('r-b')
+    const none = await repo.findByKindForBranch('o', 'p', 'b-missing', 'fly')
+    expect(none).toBeNull()
+  })
+})

@@ -17,6 +17,7 @@ export class TeardownService {
     const repo = new ResourcesRepo(this.db)
     const summary: TeardownSummary = { destroyed: [], failed: [] }
     for (const r of resources) {
+      if (r.status === 'destroyed') continue
       const adapter = this.adapters.find((a) => a.kind === r.kind)
       if (!adapter) { summary.failed.push({ kind: r.kind, message: 'no adapter configured' }); await repo.markStatus(owner, r.id, 'destroy_failed'); continue }
       try {
@@ -44,6 +45,17 @@ export class TeardownService {
         await neon.deleteBranch({ kind: 'neon', providerRef: resource.provider_ref }, branch.neon_branch_ref)
         summary.destroyed.push('neon-branch')
       } catch (e) { summary.failed.push({ kind: 'neon-branch', message: e instanceof Error ? e.message : String(e) }) }
+    }
+    const fly = this.adapters.find((a) => a.kind === 'fly')
+    const flyResource = await new ResourcesRepo(this.db).findByKindForBranch(owner, projectId, branchId, 'fly')
+    if (fly && flyResource) {
+      try {
+        await fly.destroy({ kind: 'fly', providerRef: flyResource.provider_ref })
+        await new ResourcesRepo(this.db).markStatus(owner, flyResource.id, 'destroyed')
+        summary.destroyed.push('fly')
+      } catch (e) {
+        summary.failed.push({ kind: 'fly', message: e instanceof Error ? e.message : String(e) })
+      }
     }
     await branches.archive(owner, branchId)
     return { branch: { ...branch, status: 'deleted' }, teardown: summary }

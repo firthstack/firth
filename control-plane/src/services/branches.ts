@@ -12,6 +12,8 @@ export class BranchService {
   }> {
     const neon = this.adapters.find((a) => a.kind === 'neon')
     if (!neon) throw new Error('neon adapter not configured')
+    const fly = this.adapters.find((a) => a.kind === 'fly')
+    if (!fly) throw new Error('fly adapter not configured')
 
     const resource = await new ResourcesRepo(this.db).findByKind(owner, projectId, 'neon')
     if (!resource) throw new Error('project has no neon resource')
@@ -29,6 +31,7 @@ export class BranchService {
     })
 
     let neonRef: string | null = null
+    let flyHandle: ResourceHandle | null = null
     try {
       neonRef = await neon.createBranch(handle, name, parent.neon_branch_ref)
       if (!neonRef) throw new Error('neon createBranch returned no branch id')
@@ -44,9 +47,19 @@ export class BranchService {
         }).select()
         if (sec.error) throw sec.error
       }
+
+      // Eager per-branch compute: provision a Fly app for the new branch and record it.
+      flyHandle = await fly.provision(name)
+      const res = await this.db.from('resources').insert({
+        project_id: projectId, owner, kind: 'fly', branch_id: row.id,
+        provider_ref: flyHandle.providerRef, status: 'active',
+      }).select()
+      if (res.error) throw res.error
+
       return { branch: { id: row.id, name, parentBranchId: parent.id } }
     } catch (err) {
-      // best-effort rollback — never mask the original error
+      // best-effort rollback; never mask the original error
+      try { if (flyHandle) await fly.destroy(flyHandle) } catch { /* best-effort */ }
       try { if (neonRef) await neon.deleteBranch(handle, neonRef) } catch { /* best-effort */ }
       try { await this.db.from('branches').update({ status: 'error' }).eq('id', row.id) } catch { /* best-effort */ }
       throw err

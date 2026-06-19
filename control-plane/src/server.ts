@@ -131,11 +131,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const projectId = (req.params as any).id
     const body = (req.body as any) ?? {}
     if (!body.image) return reply.code(400).send({ error: 'image is required' })
+    // `from` is an explicit branch override (id or name); otherwise the caller's
+    // linked branch (`branch`), otherwise the project's default branch.
+    let branch: string | undefined = body.from ?? body.branch
+    if (!branch) {
+      const all = await new BranchesRepo(db).listByProject(uid, projectId)
+      branch = (all.find((b) => b.is_default) ?? all[0])?.id
+    }
     const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
     const out = await new DeployService(db, deps.cfg, adapters).deploy(uid, projectId, {
-      image: body.image, from: body.from, port: body.port,
+      image: body.image, from: branch, port: body.port,
     })
-    await emit(db, uid, projectId, null, 'deploy', { machineId: out.machineId, url: out.url })
+    await emit(db, uid, projectId, branch ?? null, 'deploy', { machineId: out.machineId, url: out.url })
     return reply.send(out)
   })
 

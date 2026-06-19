@@ -64,6 +64,13 @@ export class ResourcesRepo {
     return ((data ?? [])[0] as ResourceRow) ?? null
   }
 
+  async findByKindForBranch(owner: string, projectId: string, branchId: string, kind: string): Promise<ResourceRow | null> {
+    const { data, error } = await this.db.from('resources').select()
+      .eq('owner', owner).eq('project_id', projectId).eq('branch_id', branchId).eq('kind', kind)
+    if (error) throw error
+    return ((data ?? [])[0] as ResourceRow) ?? null
+  }
+
   async listByProject(owner: string, projectId: string): Promise<ResourceRow[]> {
     const { data, error } = await this.db.from('resources').select()
       .eq('owner', owner).eq('project_id', projectId)

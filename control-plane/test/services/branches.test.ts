@@ -48,10 +48,47 @@ const seeded = () => fakeDb({
   branches: [{ id: 'b-main', owner: 'o', project_id: 'p', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' }],
 })
 
+function flyAdapter(over: Partial<ProviderAdapter> = {}): ProviderAdapter & { provisioned: string[]; destroyed: string[] } {
+  const provisioned: string[] = []
+  const destroyed: string[] = []
+  return {
+    provisioned, destroyed, kind: 'fly', branchModel: 'redeploy',
+    async provision(name: string) { provisioned.push(name); return { kind: 'fly', providerRef: { flyApp: `a-${name}`, orgSlug: 'o' } } },
+    async destroy(h: any) { destroyed.push((h.providerRef as any).flyApp) },
+    async createBranch() { return null },
+    async deleteBranch() {},
+    async mintCredentials() { return {} },
+    async readUsage() { return {} },
+    ...over,
+  } as any
+}
+
+test('branch create provisions a Fly app and records a fly resource with the new branch id', async () => {
+  const db = seeded()
+  const fly = flyAdapter()
+  const { branch } = await new BranchService(db as any, cfg, [neonAdapter(), fly]).createBranch('o', 'p', 'feature')
+  expect(fly.provisioned).toEqual(['feature'])
+  const flyRow = db.tables.resources.find((r: any) => r.kind === 'fly' && r.branch_id === branch.id)
+  expect(flyRow).toBeTruthy()
+  expect(flyRow.status).toBe('active')
+  expect(flyRow.provider_ref).toEqual({ flyApp: 'a-feature', orgSlug: 'o' })
+})
+
+test('a failing Fly provision rolls back the Neon branch and marks the branch error', async () => {
+  const db = seeded()
+  const neon = neonAdapter()
+  const fly = flyAdapter({ async provision() { throw new Error('fly provision failed') } } as any)
+  await expect(new BranchService(db as any, cfg, [neon, fly]).createBranch('o', 'p', 'feature'))
+    .rejects.toThrow('fly provision failed')
+  expect(neon.deleted).toEqual(['br-new'])  // neon.createBranch returns 'br-new'
+  const row = db.tables.branches.find((b: any) => b.name === 'feature')
+  expect(row.status).toBe('error')
+})
+
 describe('BranchService.createBranch', () => {
   test('creates a Neon branch off the parent and stores a branch-scoped DATABASE_URL', async () => {
     const db = seeded(); const neon = neonAdapter()
-    const out = await new BranchService(db as any, cfg, [neon]).createBranch('o', 'p', 'feat')
+    const out = await new BranchService(db as any, cfg, [neon, flyAdapter()]).createBranch('o', 'p', 'feat')
     expect(out.branch.name).toBe('feat')
     expect(out.branch.parentBranchId).toBe('b-main')
     const row = db.tables.branches.find((b: any) => b.name === 'feat')
@@ -65,7 +102,7 @@ describe('BranchService.createBranch', () => {
 
   test('rollback: if minting fails after the Neon branch is created, deleteBranch is called and the row is error', async () => {
     const db = seeded(); const neon = neonAdapter({ async mintCredentials() { throw new Error('mint failed') } })
-    await expect(new BranchService(db as any, cfg, [neon]).createBranch('o', 'p', 'feat')).rejects.toThrow(/mint failed/)
+    await expect(new BranchService(db as any, cfg, [neon, flyAdapter()]).createBranch('o', 'p', 'feat')).rejects.toThrow(/mint failed/)
     expect((neon as any).deleted).toEqual(['br-new'])
     expect(db.tables.branches.find((b: any) => b.name === 'feat').status).toBe('error')
     expect(db.tables.secrets.length).toBe(0)
@@ -73,13 +110,13 @@ describe('BranchService.createBranch', () => {
 
   test('throws if the parent branch is missing', async () => {
     const db = seeded()
-    await expect(new BranchService(db as any, cfg, [neonAdapter()]).createBranch('o', 'p', 'feat', 'nope'))
+    await expect(new BranchService(db as any, cfg, [neonAdapter(), flyAdapter()]).createBranch('o', 'p', 'feat', 'nope'))
       .rejects.toThrow(/parent branch/i)
   })
 
   test('throws if the project has no neon resource', async () => {
     const db = fakeDb({ branches: [{ id: 'b-main', owner: 'o', project_id: 'p', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' }] })
-    await expect(new BranchService(db as any, cfg, [neonAdapter()]).createBranch('o', 'p', 'feat'))
+    await expect(new BranchService(db as any, cfg, [neonAdapter(), flyAdapter()]).createBranch('o', 'p', 'feat'))
       .rejects.toThrow(/neon resource/i)
   })
 
@@ -88,7 +125,7 @@ describe('BranchService.createBranch', () => {
       resources: [{ id: 'r1', owner: 'o', project_id: 'p', kind: 'neon', provider_ref: { neonProjectId: 'np', defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' }, status: 'active' }],
       branches: [{ id: 'b-bad', owner: 'o', project_id: 'p', name: 'broken', parent_branch_id: null, is_default: false, neon_branch_ref: 'br-stale', status: 'error' }],
     })
-    await expect(new BranchService(db as any, cfg, [neonAdapter()]).createBranch('o', 'p', 'feat', 'broken'))
+    await expect(new BranchService(db as any, cfg, [neonAdapter(), flyAdapter()]).createBranch('o', 'p', 'feat', 'broken'))
       .rejects.toThrow(/not active/i)
   })
 })

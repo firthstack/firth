@@ -27,10 +27,10 @@ Principles that survived the pivot and still hold: orchestrate providers, don't 
 | **Resources** | Neon (DB) · S3 (storage) · Fly.io (compute) | — |
 | **Hosting** | Managed SaaS | The resource layer can't be self-hosted (provider accounts + secrets live on Firth's side); trust is earned via governance auditability + compliance, not self-hosting. |
 | **Credential path** | Provisioning-centric + env injection now, behind a **secret seam** | Ships fast; the seam lets us upgrade to runtime credential brokering later without rewriting apps. |
-| **Branching** | DB native; storage shared; compute redeploy | See §8. |
+| **Branching** | DB native; storage shared; compute per-branch (isolated Fly app) | See §8. |
 | **Backend** | [InsForge](https://insforge.dev) | See §4. |
 
-**Out of scope for v1:** failure-analysis triage logic (collect signals only), runtime credential brokering, parallel multi-branch compute, full billing (metering stubbed).
+**Out of scope for v1:** failure-analysis triage logic (collect signals only), runtime credential brokering, full billing (metering stubbed).
 
 ## 3. Two layers — never blur them
 
@@ -119,16 +119,16 @@ Firth's DB holds every customer's resource credentials — the juiciest target o
 |---|---|---|
 | DB (Neon) | native copy-on-write branch, one per branch | ✅ truly isolated |
 | Storage (S3) | all branches share one bucket | ❌ not isolated |
-| Compute (Fly) | not branched; redeploy to restore | n/a (reproducible) |
+| Compute (Fly) | per-branch isolated app (provisioned at branch-create) | n/a (reproducible) |
 
-A branch ≈ a Neon DB branch + that branch's own secret (connection string) + the shared bucket + redeployable compute.
+A branch ≈ a Neon DB branch + that branch's own secret (connection string) + the shared bucket + that branch's own isolated Fly app.
 
-**Honest caveat (a known hole, not papered over):** because storage is shared, a branch gives **no isolation for S3** — an agent that deletes/overwrites objects on a branch affects the main branch, and discarding the branch won't bring them back. "branch = undo" holds for the DB only. Storage recovery needs a separate mechanism (S3 versioning, or Observe + a compensating action). Derived UX consequence: there is one Fly app per project, so deploying "on a branch" repoints that app at the branch's DB and redeploys — only one branch's compute is live at a time. Parallel multi-branch compute is a later concern.
+**Honest caveat (a known hole, not papered over):** because storage is shared, a branch gives **no isolation for S3** — an agent that deletes/overwrites objects on a branch affects the main branch, and discarding the branch won't bring them back. "branch = undo" holds for the DB only. Storage recovery needs a separate mechanism (S3 versioning, or Observe + a compensating action). Each branch has its own Fly app, so multiple branches' compute run in parallel; deploying "on a branch" targets that branch's app.
 
 ## 9. Key flows & the provisioning saga
 
 - **`firth project create <name>`** — insert project + default `main` branch; concurrently provision Neon (+ create its `main` branch), S3, Fly; `mintCredentials` → encrypt → store; the CLI pulls provider skills locally. Because this is multi-step across three external providers, **partial failure is the norm**: it runs as a **saga** — each step records `resources.status`, is idempotent/retryable, and on failure either resumes or compensates (destroys partial resources). Never leave orphan resources; never report false success.
-- **`firth branch create <name> [--from main]`** — insert branch; `NeonAdapter.createBranch` (native); mint that branch's DB connection string; S3/Fly are no-ops (shared).
+- **`firth branch create <name> [--from main]`** — insert branch; `NeonAdapter.createBranch` (native); mint that branch's DB connection string; S3 is shared (no-op); Fly provisions a new isolated app for the branch.
 - **`firth deploy [--branch]`** — bundle source → resolve the branch's secret bundle via the seam → inject into Fly → deploy → emit a side-effect event to Observe.
 
 ## 10. Observability & failure analysis

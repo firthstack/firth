@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Panel, Row, TButton, TInput, Confirm, CliHint } from '../ui/Terminal'
 import type { Api } from '../api/client'
-import type { ProjectDetail as Detail, Resource } from '../types'
+import type { ProjectDetail as Detail, Resource, Branch } from '../types'
 
 // ---------------------------------------------------------------------------
 // Helper: copy text to clipboard (guarded for missing API)
@@ -143,25 +143,33 @@ function StorageCard({
 // ---------------------------------------------------------------------------
 // Compute card
 // ---------------------------------------------------------------------------
-function ComputeCard({ resource }: { resource: Resource | undefined }) {
-  const ref = resource?.provider_ref ?? {}
-  const flyApp = String(ref.flyApp ?? '')
-  const orgSlug = String(ref.orgSlug ?? '')
-
+function ComputeCard({ resources, branches }: { resources: Resource[]; branches: Branch[] }) {
+  const flyResources = resources.filter((r) => r.kind === 'fly')
+  const nameFor = (id?: string) => branches.find((b) => b.id === id)?.name ?? '(unknown branch)'
   return (
     <Panel title="compute">
-      {!resource ? (
+      {flyResources.length === 0 ? (
         <p className="firth-dim">not provisioned</p>
       ) : (
-        <>
-          <Row>
-            <span className="firth-dim">{resource.status}</span>
-          </Row>
-          {flyApp && <SecretRow label="app" value={flyApp} />}
-          {orgSlug && <SecretRow label="org" value={orgSlug} />}
-          <SecretRow label="spec" value="shared-cpu-1x · 1 vCPU · 256 MB" />
-          <p className="firth-dim">deploy with `firth deploy` to create a machine</p>
-        </>
+        flyResources.map((resource) => {
+          const ref = resource.provider_ref ?? {}
+          const flyApp = String(ref.flyApp ?? '')
+          const orgSlug = String(ref.orgSlug ?? '')
+          return (
+            <div key={resource.branch_id ?? flyApp}>
+              <Row>
+                <strong>{nameFor(resource.branch_id)}</strong>
+                <span className="firth-dim">{resource.status}</span>
+              </Row>
+              {flyApp && <SecretRow label="app" value={flyApp} />}
+              {orgSlug && <SecretRow label="org" value={orgSlug} />}
+              <SecretRow label="spec" value="shared-cpu-1x · 1 vCPU · 256 MB" />
+            </div>
+          )
+        })
+      )}
+      {flyResources.length > 0 && (
+        <p className="firth-dim">deploy with `firth deploy` to create a machine</p>
       )}
     </Panel>
   )
@@ -228,7 +236,6 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
 
   const neonResource = detail?.resources.find((r) => r.kind === 'neon')
   const s3Resource = detail?.resources.find((r) => r.kind === 's3')
-  const flyResource = detail?.resources.find((r) => r.kind === 'fly')
 
   return (
     <div>
@@ -244,7 +251,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
         <>
           <PostgresCard resource={neonResource} databaseUrl={branchSecrets['DATABASE_URL']} />
           <StorageCard resource={s3Resource} projectSecrets={projectSecrets} />
-          <ComputeCard resource={flyResource} />
+          <ComputeCard resources={detail?.resources ?? []} branches={detail?.branches ?? []} />
           <Panel title="branches">
             <Row><TButton onClick={() => setCreating((c) => !c)}>[+ create branch]</TButton></Row>
             <CliHint command="firth branch create <name>" note="# or from the cli — forks an isolated db branch" />

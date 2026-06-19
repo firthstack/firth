@@ -12,7 +12,10 @@ export async function deploy(argv: string[], deps: CliDeps & { makeApi?: () => F
   const link = readProjectLink(deps.cwd)
   if (!link) { deps.print('this directory is not linked — run `firth project link <id>`'); return 1 }
   const out = await apiFromDeps(deps).deploy(link.projectId, {
-    image: values.image, from: values.from, port: values.port ? Number(values.port) : undefined,
+    image: values.image,
+    from: values.from,
+    branch: link.branch?.id ?? link.branch?.name,
+    port: values.port ? Number(values.port) : undefined,
   })
   deps.print(`deployed machine ${out.machineId} → ${out.url}`)
   return 0
