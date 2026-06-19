@@ -104,8 +104,11 @@ Owns the delete invariants and the adapter teardown sequence.
 
 - `GET /projects/:id` → `{ project, branches, resources }`. `branches` from
   `BranchesRepo.listByProject` (archived filtered out); `resources` = `kind`, `status`,
-  and a **whitelisted projection of `provider_ref`** per kind (neon: `project_id`,
-  `branch_id`, `host`, `database`; fly: `app`, `region`; s3: `bucket`, `endpoint`).
+  and a **whitelisted projection of `provider_ref`** per kind, listing only non-credential
+  handle keys (neon: `neonProjectId`, `defaultBranchId`, `dbName`, `roleName`, `host`,
+  `database`, `region`; fly: `app`, `appName`, `machineId`, `region`; s3: `bucket`,
+  `bucketName`, `endpoint`, `region`). Credential-shaped keys (password/secret/key/token/uri/url)
+  are never listed.
   Credentials (connection URIs with passwords, access keys) live encrypted in the
   `secrets` table and are returned by no endpoint; the whitelist makes the no-secret
   guarantee hold **by construction**, independent of whatever provisioning happened to
