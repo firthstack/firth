@@ -2,6 +2,10 @@ export class UnauthorizedError extends Error {
   constructor(msg = 'unauthorized') { super(msg); this.name = 'UnauthorizedError' }
 }
 
+export class NotFoundError extends Error {
+  constructor(msg = 'not found') { super(msg); this.name = 'NotFoundError' }
+}
+
 export async function resolveUid(
   authHeader: string | undefined,
   verify: (token: string) => Promise<{ id: string } | null>,

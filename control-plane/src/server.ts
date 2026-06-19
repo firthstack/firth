@@ -1,12 +1,13 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import type { FirthConfig } from './config.js'
-import { resolveUid, UnauthorizedError } from './auth.js'
+import { resolveUid, UnauthorizedError, NotFoundError } from './auth.js'
 import type { DataClient } from './db/types.js'
-import { ProjectsRepo, SecretsRepo, BranchesRepo, EventsRepo } from './db/repos.js'
+import { ProjectsRepo, SecretsRepo, BranchesRepo, ResourcesRepo, EventsRepo } from './db/repos.js'
 import { decryptSecret } from './crypto/secrets.js'
 import { ProvisioningService } from './services/provisioning.js'
 import { BranchService } from './services/branches.js'
 import { DeployService } from './services/deploy.js'
+import { publicResourceView } from './services/resource-view.js'
 import type { ProviderAdapter } from './adapters/types.js'
 
 export type ServerDeps = {
@@ -22,6 +23,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.setErrorHandler((err, _req, reply) => {
     // Static strings only — never echo err.message/stack (they may carry tokens or secrets).
     if (err instanceof UnauthorizedError) return reply.code(401).send({ error: 'unauthorized' })
+    if (err instanceof NotFoundError) return reply.code(404).send({ error: err.message })
     return reply.code(500).send({ error: 'internal error' })
   })
 
@@ -50,6 +52,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const { uid, db } = await auth(req)
     const projects = await new ProjectsRepo(db).listByOwner(uid)
     return reply.send({ projects })
+  })
+
+  app.get('/projects/:id', async (req, reply) => {
+    const { uid, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const project = await new ProjectsRepo(db).findById(uid, projectId)
+    if (!project) throw new NotFoundError('project not found')
+    const branches = await new BranchesRepo(db).listByProject(uid, projectId)
+    const resources = (await new ResourcesRepo(db).listByProject(uid, projectId)).map(publicResourceView)
+    return reply.send({ project, branches, resources })
   })
 
   app.post('/projects/:id/branches', async (req, reply) => {

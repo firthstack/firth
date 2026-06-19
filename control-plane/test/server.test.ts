@@ -7,6 +7,13 @@ const env = { FIRTH_KEK_CURRENT: 'v1', FIRTH_KEK_v1: randomBytes(32).toString('b
 const { keks, current } = loadKeks(env)
 const cfg = { keks, currentKek: current, insforge: { baseUrl: 'x', anonKey: 'a', adminKey: 'ik' } }
 
+const fakeNeon = {
+  kind: 'neon', branchModel: 'native',
+  async provision(name: string) { return { kind: 'neon', providerRef: { neonProjectId: `np-${name}`, defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' } } },
+  async destroy() {}, async createBranch() { return 'br-x' },
+  async mintCredentials() { return { DATABASE_URL: 'postgresql://conn' } }, async readUsage() { return {} },
+}
+
 // Fake with PostgREST-faithful eq/is semantics:
 //   eq(col, null)  → matches nothing (mirrors col=eq.null, not IS NULL)
 //   is(col, null)  → matches rows where col is null/undefined
@@ -53,12 +60,6 @@ function fakeData() {
 
 test('POST /projects provisions via the saga and lists the project', async () => {
   const db = fakeData() // ensure fakeData supports insert/select/eq/update (mirror provisioning.test.ts fake)
-  const fakeNeon = {
-    kind: 'neon', branchModel: 'native',
-    async provision(name: string) { return { kind: 'neon', providerRef: { neonProjectId: `np-${name}`, defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' } } },
-    async destroy() {}, async createBranch() { return 'br-x' },
-    async mintCredentials() { return { DATABASE_URL: 'postgresql://conn' } }, async readUsage() { return {} },
-  }
   const app = buildServer({
     cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any,
     adaptersForToken: () => [fakeNeon as any],
@@ -212,4 +213,41 @@ test('POST /projects/:id/deploy emits a resource event onto the timeline', async
   expect(r.statusCode).toBe(200)
   const list = await app.inject({ method: 'GET', url: '/projects/p1/events', headers: { authorization: 'Bearer good' } })
   expect(list.json().events.map((e: any) => e.kind)).toContain('deploy')
+})
+
+test('GET /projects/:id returns { project, branches, resources }', async () => {
+  const db = fakeData()
+  const project = (await db.from('projects').insert({ owner: 'uid-1', name: 'alpha', status: 'active' }).then((r: any) => r)).data[0]
+  await db.from('branches').insert({ project_id: project.id, owner: 'uid-1', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' })
+  await db.from('resources').insert({ owner: 'uid-1', project_id: project.id, kind: 'neon', provider_ref: { neonProjectId: 'np-1' }, status: 'active' })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const res = await app.inject({ method: 'GET', url: `/projects/${project.id}`, headers: { authorization: 'Bearer good' } })
+  expect(res.statusCode).toBe(200)
+  const body = res.json()
+  expect(body.project.id).toBe(project.id)
+  expect(body.branches.map((b: any) => b.name)).toEqual(['main'])
+  expect(body.resources[0].kind).toBe('neon')
+})
+
+test('GET /projects/:id drops credential-shaped provider_ref keys (whitelist)', async () => {
+  const db = fakeData()
+  const project = (await db.from('projects').insert({ owner: 'uid-1', name: 'alpha', status: 'active' }).then((r: any) => r)).data[0]
+  await db.from('resources').insert({
+    owner: 'uid-1', project_id: project.id, kind: 'neon',
+    provider_ref: { neonProjectId: 'np', password: 'SECRET', connectionUri: 'postgres://u:p@h' }, status: 'active',
+  })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const res = await app.inject({ method: 'GET', url: `/projects/${project.id}`, headers: { authorization: 'Bearer good' } })
+  const ref = res.json().resources[0].provider_ref
+  expect(ref.neonProjectId).toBe('np')
+  expect(ref.password).toBeUndefined()
+  expect(ref.connectionUri).toBeUndefined()
+})
+
+test('GET /projects/:id for an unknown project → 404', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const res = await app.inject({ method: 'GET', url: '/projects/nope', headers: { authorization: 'Bearer good' } })
+  expect(res.statusCode).toBe(404)
+  expect(res.json().error).toBe('project not found')
 })
