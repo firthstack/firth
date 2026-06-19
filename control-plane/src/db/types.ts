@@ -7,6 +7,7 @@ export type SecretRow = NewSecretRow & { id: string }
 export type ResourceRow = {
   id: string; project_id: string; owner: string
   kind: string; provider_ref: Record<string, unknown>; status: string
+  branch_id?: string | null
 }
 export type BranchRow = {
   id: string; project_id: string; owner: string; name: string
