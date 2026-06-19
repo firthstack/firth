@@ -1,177 +1,160 @@
 # Firth — Architecture & Design Decisions
 
-This document captures the *why* behind Firth: the problem we're solving, the design choices we've already made, and the things we've explicitly chosen *not* to do. It's intended for contributors and for AI agents reading this repo to understand the project's shape.
+The *why* and *how* behind Firth: what we're building, the decisions already locked, and what's deliberately out of scope. Written for contributors and for agents reading this repo. For the strategic framing see [README.md](./README.md); for the full design spec and implementation plan see [`docs/superpowers/`](./docs/superpowers/).
 
 ---
 
-## 1. Mission
+## 1. What we're building — and what we killed
 
-> Make it possible for an AI coding agent and its human collaborator to take a web product idea from "I have a stack" to "it's live in production" without either of them needing to memorize the operational quirks of every cloud platform involved.
+Firth is a **builder platform / agent-action control plane**: developers and their agents create projects that orchestrate third-party resources, with secrets, observability, and failure analysis layered on top as the high-value surface.
 
-Concretely: Firth turns operational knowledge — which platform to pick, how to scaffold for it, how to deploy, how to manage secrets, how to debug — into a portable, versioned, agent-readable layer that lives *in the user's project*.
+An earlier direction is **explicitly dead**: an "operational knowledge layer" that helped vibe coders + agents pick a stack, scaffold, deploy, and manage keys. It was killed by a three-way squeeze:
 
-## 2. The problem
+1. **Agents now self-select stacks and operate platforms** — the knowledge gap it sold into closed.
+2. **Platforms verticalized into full-stack** (Cloudflare / Vercel / Railway) — the integration gap closed.
+3. **Stripe Projects ate provision + credentials + billing** (a public catalog of dozens of providers, with provider skills auto-injected into the agent's context).
 
-Vibe coders today face a workflow that looks something like:
+The lesson, and the principle that now governs every decision: **anything that is "knowledge" is not a moat — the agent already has it, or a connector injects it. Firth sells trust/control, which commoditization *strengthens* rather than erodes.**
 
-1. They (or their agent) write app code.
-2. They Google "how to deploy Next.js + Postgres on a budget."
-3. They get conflicting advice from blog posts of varying ages.
-4. They pick a stack semi-randomly.
-5. They spend a weekend wiring up Vercel + a Postgres host + secrets + CI.
-6. The deploy fails with a cryptic error. The agent can't help because the failure context is in their terminal scrollback, not in a form the agent can reason about.
-7. Repeat.
+Principles that survived the pivot and still hold: orchestrate providers, don't be a PaaS; emit agent-consumable output; one unified secrets boundary; agent-aware error handling; project state an agent can always read back.
 
-The state-of-the-art alternative — "ask the agent what stack to use" — partially works, but the agent's training data is months stale, it has no awareness of the user's actual project state, and its recommendations come without runnable scaffolding or operational follow-through.
+## 2. Locked decisions
 
-## 3. Why a "directory site" doesn't solve this
+| Decision | Value | Consequence |
+|---|---|---|
+| **Role** | Orchestrator, not reseller | Resource cost passed through; profit = integration + governance. Keeps Firth a neutral judge, not a "sell more" vendor. |
+| **Account-of-record** | Firth provisions under its own Neon / S3 / Fly keys | Every resource credential flows through Firth **by construction** → the enforcement chokepoint is structural, not bolted on. |
+| **Resources** | Neon (DB) · S3 (storage) · Fly.io (compute) | — |
+| **Hosting** | Managed SaaS | The resource layer can't be self-hosted (provider accounts + secrets live on Firth's side); trust is earned via governance auditability + compliance, not self-hosting. |
+| **Credential path** | Provisioning-centric + env injection now, behind a **secret seam** | Ships fast; the seam lets us upgrade to runtime credential brokering later without rewriting apps. |
+| **Branching** | DB native; storage shared; compute redeploy | See §8. |
+| **Backend** | [InsForge](https://insforge.dev) | See §4. |
 
-We considered (and rejected) building a curated directory of dev tools — yet another `awesome-platforms`. Three reasons it doesn't work:
+**Out of scope for v1:** failure-analysis triage logic (collect signals only), runtime credential brokering, parallel multi-branch compute, full billing (metering stubbed).
 
-1. **Information rot.** Pricing, free tiers, and product positioning change monthly. Manual lists go stale within a quarter.
-2. **No decision support.** A list of 30 Postgres hosts doesn't help a beginner pick one. Lists ≠ help.
-3. **No moat against AI.** A user can ask their agent the same question and get a comparable answer; there's no reason to visit a directory site.
+## 3. Two layers — never blur them
 
-The differentiation has to come from being *executable* and *agent-shaped*, not from being *comprehensive*.
+- **firth-as-tenant-of-InsForge** — Firth's *own* auth, metadata, API, and site run on InsForge.
+- **firth-provisions-for-users** — Neon / S3 / Fly resources, orchestrated by adapters, created under Firth's own provider org accounts.
 
-## 4. Differentiation strategy
+Two same-named-but-different concepts kept distinct in code and docs: a **`firth-meta branch`** (InsForge backend branch, for testing Firth's own backend) ≠ a **`user-project branch`** (a Neon branch Firth creates for a user's project). Likewise, the Fly org Firth opens user compute in ≠ the Fly org InsForge runs Firth's own compute in.
 
-Firth's value sits in things a static directory and a generic AI chat *can't* easily produce:
+## 4. Surfaces and the control plane
 
-- **Pre-validated stack templates** — not "here are 5 Postgres hosts," but "here's a complete, deployable Next.js + Neon + Vercel + Railway project, with the Skills your agent needs to operate it."
-- **Agent-consumable knowledge** — Skills that teach the agent about the chosen stack, runbooks for when things break, structured CLI errors with next-step hints.
-- **Project-local state** — `firth.config.ts` and `firth.lock.json` so the agent can always answer "what services does this project depend on, and what state are they in?"
-- **A thin orchestration CLI** — wraps the official CLIs/APIs of each provider, doesn't reimplement them.
+- **Control plane API (the brain)** — runs on **InsForge compute**. The single source of truth.
+- **Web app / dashboard** — runs on **InsForge sites**. For humans.
+- **firth-cli** — the agent/dev interface. Like the web app, just a client of the control-plane API.
 
-## 5. The three-layer architecture
+### Subsystem → InsForge primitive
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  L1 — KNOWLEDGE  (this repo: firth)                          │
-│      skills/  templates/  runbooks  CLAUDE.md / AGENTS.md    │
-│      Static, version-controlled, ships in user's project     │
-└──────────────────────────────────────────────────────────────┘
-┌──────────────────────────────────────────────────────────────┐
-│  L2 — CLI  (separate repo: firth-cli)                        │
-│      firth init / deploy / secrets / logs / status / db:*    │
-│      Thin orchestrator over each provider's CLI/API          │
-└──────────────────────────────────────────────────────────────┘
-┌──────────────────────────────────────────────────────────────┐
-│  L3 — MCP SERVER  (future, optional)                         │
-│      Structured tool calls for cases where CLI text          │
-│      output is too unstructured for agents to reason about   │
-└──────────────────────────────────────────────────────────────┘
-```
+| Firth subsystem | Rides on | Custom code |
+|---|---|---|
+| Control-plane API | InsForge **compute** + **Postgres** | orchestration (saga) |
+| Firth accounts | InsForge **auth** (Google / GitHub OAuth) | ~none |
+| Metadata DB | InsForge **Postgres + RLS** | migrations |
+| Resource adapters | compute | **Neon / S3 / Fly adapters (the core)** |
+| Secret seam | ciphertext in **Firth DB**; KEK in InsForge **secrets / compute env** | seam + scoped-env generation |
+| Observability | InsForge **logs** + Postgres tables | `observe/` hook ingest + correlation |
+| Metering | InsForge **scheduled jobs** (stubbed in v1) | metering logic |
 
-### L1 — Knowledge layer (this repo)
+The genuinely-from-scratch code is small: the three provider adapters, the orchestration + secret seam, the Observe correlation, and the CLI + web. Everything else is InsForge configuration + migrations.
 
-- **Skills** in [Anthropic Skills format](https://docs.claude.com) — Markdown files with YAML frontmatter that teach an agent one capability each ("deploy a Next.js app to Vercel," "set up Neon Postgres with connection pooling," "diagnose a Railway build failure").
-- **Templates** — fully scaffolded project starters for each golden path. Each template ships with its own `.claude/skills/` (or equivalent) directory, `RUNBOOK.md`, `CLAUDE.md` / `AGENTS.md`, `.env.example`, and CI config.
-- **Runbooks** — "what to do when X breaks" guides that the agent reads when triaging issues.
+## 5. Metadata schema (built)
 
-A user who runs `firth init` ends up with all of L1's relevant files copied into their project, where they live alongside their app code and travel with the repo.
-
-### L2 — CLI (separate repo, `firth-cli`)
-
-- **Thin, not thick.** Firth's CLI does **not** abstract over providers in a way that hides their behavior. `firth deploy` reads `firth.config.ts`, figures out which providers are involved, and shells out to their official CLIs/APIs (`vercel deploy`, `flyctl deploy`, Railway API, Neon API, ...). We are the package.json scripts of the cloud, not a competing PaaS.
-- **State-aware.** Every resource the CLI creates (Neon DB ID, Railway service ID, Vercel project ID) is recorded in `firth.lock.json`. This is the project's source-of-truth for "what infra exists right now."
-- **Agent-friendly output.** Every command emits structured output (text + optional JSON) and, on failure, includes a likely cause and suggested next actions. See §7.
-
-### L3 — MCP server (future)
-
-When CLI text output isn't structured enough — e.g. an agent wants to query "all errors in the last hour" or "current row count in users table" — a Firth MCP server can expose those queries as tool calls. This is explicitly out of scope for v0.1.
-
-## 6. Key design decisions (already settled)
-
-### 6.1 No abstraction over provider CLIs/APIs
-
-We call the official CLIs and APIs directly. We do not write wrappers that re-implement provider features. Reason: any wrapper we add becomes a maintenance liability the moment the provider's API drifts. The CLI's job is *orchestration*, not *abstraction*.
-
-### 6.2 Skills format = Anthropic Skills
-
-We adopt the Anthropic Skills format (`SKILL.md` with YAML frontmatter) as our source of truth. It's the most standardized agent-knowledge format in 2026 and has the most ecosystem traction.
-
-If demand emerges, we'll add a `firth skills sync` (or similar) command that compiles Skills to other formats (`.cursorrules`, `.github/copilot-instructions.md`, ...). But there's a single source format.
-
-### 6.3 Local state file: `firth.config.ts` + `firth.lock.json`
-
-- **`firth.config.ts`** — declarative, hand-edited. Defines which providers the project uses, with which settings. Committed to git.
-- **`firth.lock.json`** — generated, machine-managed. Holds resource IDs, deployment URLs, current state. Committed to git so any agent session can read it.
-
-This split mirrors the `package.json` / `package-lock.json` pattern that developers already understand.
-
-### 6.4 Auth & secrets
-
-- A unified `firth secrets set/get/list` interface that syncs secrets across all providers a project uses (e.g. setting `DATABASE_URL` once pushes it to both Vercel and Railway).
-- Local development: secrets land in `.env.local` (git-ignored).
-- Provider auth: tokens stored in OS keychain, never in plaintext config.
-- Never has the agent paste tokens into chat or code; the CLI handles all credential I/O.
-
-### 6.5 Agent-aware error handling
-
-Every CLI failure emits output of the form:
+InsForge Postgres, `public` schema, RLS on every table, `owner` denormalized onto each table for join-free non-recursive policies, `owner` immutable (trigger-guarded), `(SELECT auth.uid())` subquery form, policy/lookup columns indexed.
 
 ```
-ERROR: deploy failed - Neon database connection refused
-LIKELY CAUSE: connection pooler not enabled
-SUGGESTED ACTIONS:
-  1. Run: firth db:fix-pooling
-  2. Or read: skills/neon-pooling/SKILL.md
+projects(id, owner=auth.uid(), name, status, created_at, updated_at)
+
+branches(id, project_id, owner, name, parent_branch_id?, is_default,
+         neon_branch_ref?,        -- per-branch Neon branch (DB is the only truly isolated resource)
+         status, created_at, updated_at)
+
+resources(id, project_id, owner, kind∈{neon|s3|fly},
+          provider_ref jsonb,     -- neon project id / bucket name / fly app id
+          status, created_at, updated_at)   -- project-scoped: S3 bucket & Fly app shared across branches
+
+secrets(id, project_id, owner, branch_id?,  -- branch_id NULL → project-scoped (S3/Fly); set → that branch's DB conn
+        name, ciphertext, nonce, kek_version, expires_at?, created_at)
 ```
 
-This is not a stylistic choice — it's a **product decision**. Without it, an agent that hits a deploy failure has no path forward except guessing. With it, the failure is a recoverable step in the agent's loop.
+## 6. Provider adapter interface (core, to build)
 
-### 6.6 Killer feature: `firth handoff`
+The three providers must present one shape so orchestration is uniform:
 
-Generates a single Markdown file describing:
-- Current stack and provider setup
-- Deployment URLs and resource IDs (from `firth.lock.json`)
-- Last successful deploy, last failure, recent changes
-- Known issues / open TODOs
+```ts
+interface ProviderAdapter {
+  kind: 'neon' | 's3' | 'fly'
+  branchModel: 'native' | 'shared' | 'redeploy'
+  provision(projectId): ResourceHandle              // create the base resource
+  destroy(handle): void                             // for compensating rollback
+  createBranch(handle, name, parentRef?): BranchRef | null   // neon=native; s3/fly=null
+  mintCredentials(handle, branchRef?): SecretBundle // connection creds; DB varies per branch
+  readUsage(handle): UsageSnapshot                  // metering (stubbed v1)
+}
+```
 
-This file is optimized for pasting into a fresh agent session. Vibe coders restart agent sessions constantly; this is the cheapest, highest-impact feature we can build to make Firth indispensable.
+| | provision | branchModel | mintCredentials |
+|---|---|---|---|
+| Neon | project/DB in Firth's Neon org | `native` (API branch) | that branch's connection string |
+| S3 | bucket in Firth's Tigris account (S3-compatible; `t3.storage.dev`) via bucket-scoped keys minted through Tigris IAM (`iam.storage.dev`) | `shared` (createBranch→null) | bucket-scoped creds |
+| Fly | app in Firth's Fly org | `redeploy` (no branch) | (compute consumes others' creds) |
 
-## 7. MVP path
+Adapters call provider APIs directly — we orchestrate, we don't re-abstract a provider's features (any such wrapper becomes a liability the moment the provider's API drifts).
 
-We do **not** support every platform out of the gate. The first milestone is one golden path, end-to-end perfect:
+## 7. Secret management & encryption (built)
 
-> **Next.js frontend + Hono (or Express) backend + Neon Postgres + Vercel (frontend) + Railway (backend)**
+The **secret seam** — `firth secrets <project> [--branch]` — is the *only* path that yields a credential: the control plane decrypts server-side, returns over TLS, and the CLI writes a local `.env` or injects into a Fly deploy. Apps and agents never hardcode connection strings. Today it's env injection; swapping to runtime short-lived brokering later is a change behind the seam, not an app rewrite.
 
-The deliverable is:
+Firth's DB holds every customer's resource credentials — the juiciest target on the network — so encryption is non-negotiable:
 
-1. `firth init my-app` produces a runnable project including Skills, RUNBOOK, CI.
-2. `firth deploy` takes the project from local to live URLs (creating Neon DB, pushing to Vercel, pushing to Railway).
-3. `firth secrets set KEY=value` syncs to Vercel + Railway.
-4. Five Skills shipped with the template:
-   - Stack overview
-   - Deploy flow
-   - Debug runbook
-   - Cost & scaling considerations
-   - Handoff (project state dump for fresh agent sessions)
+- Secret rows are **AES-256-GCM** encrypted in the app layer (fresh 12-byte nonce per encryption; auth-tag verified on decrypt).
+- The **KEK lives outside this DB** (InsForge secrets / compute env), so a DB dump alone is useless. `kek_version` supports rotation. KEK labels must be uppercase (`FIRTH_KEK_V1`) to be settable as InsForge compute env keys.
+- Plaintext and key material never appear in logs or error responses (the API error handler returns static strings only).
+- Two classes of secret: Firth's **master provider keys** (few, rarely rotated) live in InsForge secrets / compute env; **per-project/branch derived credentials** are encrypted in the Firth DB.
 
-We let real users (target: 10 vibe coders + their agents) run this for a week before deciding what to build next. The next provider is **not** prioritized until the first one's agent ergonomics are tight.
+## 8. Branching semantics
 
-## 8. Out of scope for v1
+| Resource | On branch | Isolated? |
+|---|---|---|
+| DB (Neon) | native copy-on-write branch, one per branch | ✅ truly isolated |
+| Storage (S3) | all branches share one bucket | ❌ not isolated |
+| Compute (Fly) | not branched; redeploy to restore | n/a (reproducible) |
 
-Explicitly cut from v1 to keep scope honest:
+A branch ≈ a Neon DB branch + that branch's own secret (connection string) + the shared bucket + redeployable compute.
 
-- **AWS** — too complex for a thin orchestrator at this stage; the abstraction surface is too wide. Likely a v2 target.
-- **Visual stack picker / web UI** — the interactive CLI is enough.
-- **AI-powered "smart" stack recommendation** — a 60-line decision tree based on user inputs (framework, persistence needed?, budget) is sufficient.
-- **MCP server** — interesting, but build only when the CLI's output truly can't carry the agent forward.
-- **Affiliate / sponsored placements** — never. Firth's recommendations must be trustworthy. We will rely on donations / GitHub Sponsors if monetization is needed.
-- **Multiple framework matrices** — pick one (Next.js) for v1.
+**Honest caveat (a known hole, not papered over):** because storage is shared, a branch gives **no isolation for S3** — an agent that deletes/overwrites objects on a branch affects the main branch, and discarding the branch won't bring them back. "branch = undo" holds for the DB only. Storage recovery needs a separate mechanism (S3 versioning, or Observe + a compensating action). Derived UX consequence: there is one Fly app per project, so deploying "on a branch" repoints that app at the branch's DB and redeploys — only one branch's compute is live at a time. Parallel multi-branch compute is a later concern.
 
-## 9. Open questions
+## 9. Key flows & the provisioning saga
 
-These are unresolved and will need answers before v1 ships:
+- **`firth project create <name>`** — insert project + default `main` branch; concurrently provision Neon (+ create its `main` branch), S3, Fly; `mintCredentials` → encrypt → store; the CLI pulls provider skills locally. Because this is multi-step across three external providers, **partial failure is the norm**: it runs as a **saga** — each step records `resources.status`, is idempotent/retryable, and on failure either resumes or compensates (destroys partial resources). Never leave orphan resources; never report false success.
+- **`firth branch create <name> [--from main]`** — insert branch; `NeonAdapter.createBranch` (native); mint that branch's DB connection string; S3/Fly are no-ops (shared).
+- **`firth deploy [--branch]`** — bundle source → resolve the branch's secret bundle via the seam → inject into Fly → deploy → emit a side-effect event to Observe.
 
-- **Sustainable maintenance of pricing/free-tier data.** If we ever surface cost estimates inside the CLI, the underlying data must be auto-updated (scrape + diff) rather than hand-curated. Not a v0.1 problem, but a v1 problem.
-- **Multi-agent format support.** Do we ship a `sync` command to translate Skills → `.cursorrules` etc., or do we wait for the ecosystem to converge on Skills natively?
-- **Repo split granularity.** Long term, do `skills/`, `templates/`, and `firth-cli` stay in three repos, or fold back into a monorepo? Defer until contributor velocity tells us which is friction.
+## 10. Observability & failure analysis
 
-## 10. Naming
+Two event streams keyed by `(project, branch)`, correlated into one timeline:
 
-The project is named **Firth** — Scottish for a narrow inlet of the sea, the place where a river enters the ocean. The metaphor: a builder's code is the river, the cloud is the sea, and Firth is the channel that gets the river there reliably.
+- **Agent actions** — from the `observe/` hook (what the agent did: files edited, commands run, credentials touched) → control-plane ingest.
+- **Resource side-effects** — deploys, migrations, provisioning, usage, provider logs.
 
-(Naming history is preserved here for posterity. We considered and rejected: `vibe`, `agent.stack`, `rig` (collision with rig.rs / rig-core LLM framework), `keel` (collision with keel.so backend service), `kindo` (collision with kindo.ai agent platform), and a long tail of common English words taken on npm. `firth` was the first candidate clean across npm, pypi, and crates.io.)
+The unit is "agent action ↔ resource side-effect" (e.g. *agent issued a refund → which rows changed → which credential was used*) — deliberately **not** the prompt/token/trace unit that dev-time agent-observability tools (LangSmith, Langfuse, ...) track. Failure analysis is a triage layer on top of this timeline (v1 collects the data; triage logic comes later). This is the agent-aware "what state is this project in / what just broke" surface, evolved from the old handoff idea.
+
+## 11. Security
+
+- Firth is a credential honeypot → §7's encryption discipline is mandatory, not optional.
+- RLS isolates every tenant (the load-bearing control for a multi-tenant credential store).
+- Master provider keys and per-resource derived credentials are stored separately.
+- API errors return static strings; no secret/PII/error detail is ever echoed or logged.
+
+## 12. Status, build order, and known gaps
+
+**Built (Foundation, `control-plane/`, TypeScript/Node on InsForge):** metadata schema + RLS migration; AES-256-GCM secret module with versioned KEK; config loader; injectable repository layer; InsForge client factory (admin + per-user-token, SDK confined to one file); bearer-token auth; project service; Fastify API (`POST/GET /projects` + the `GET /projects/:id/secrets` seam); Dockerfile + bootstrap. Full test suite green.
+
+**Build order from here:** (1) Neon adapter + `create project` saga → (2) S3 + Fly adapters → (3) branching → (4) `firth-cli` + skill download + `deploy` → (5) Observe correlation + dashboard.
+
+**Known gaps (tracked):** automated cross-user RLS isolation test (needs authenticated-token fixtures — current tests verify policy shape); admin-context secret writes for the background saga; moving the KEK from env into the InsForge secrets vault; live compute deploy (InsForge compute is private preview and needs the project's anon key + access).
+
+## 13. Naming
+
+**Firth** — Scottish for a narrow inlet where a river meets the sea: the builder's work is the river, the cloud is the sea, Firth is the channel that carries it out — and now the channel every credential and action flows through. (Rejected, for posterity: `vibe`, `agent.stack`, `rig`, `keel`, `kindo` — collisions on npm/crates/existing products. `firth` was first clean across npm, pypi, and crates.io.)

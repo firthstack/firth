@@ -1,96 +1,70 @@
 # Firth
 
-> Cloud platform SDK for AI coding agents — help builders ship real apps with the help of their agent.
+> A builder platform for agents and developers: spin up a project with real cloud resources, and get unified secrets, runtime observability, and failure analysis on top — the things an autonomous agent actually needs to operate safely.
 
-**Status:** Early WIP. APIs, Skills, and the CLI surface are still moving. Not yet recommended for production projects.
+**Status:** Early WIP. The control-plane **Foundation** is built (auth, metadata + RLS, encrypted secret store, projects API on [InsForge](https://insforge.dev)); provider adapters, branching, and observability are next. Not yet for production.
 
 ---
 
-## Why Firth?
+## The bet (why now)
 
-Modern builders — many of them "vibe coders" turning an idea into a web product with an AI coding agent at their side — have access to an embarrassment of dev infrastructure: Vercel, Railway, Fly, Neon, Supabase, Upstash, BetterStack, Resend, and on and on. The hard part isn't writing the app anymore. The hard part is the **operational layer**:
+In the agent era, base infrastructure — databases, compute, storage — is commoditizing:
 
-- Which platforms fit *this* project's shape and budget?
-- How do I scaffold a project that's actually deployable on day one, not day fourteen?
-- How do I push secrets across three providers without leaking them?
-- When the deploy fails, what do I do — and can my agent help me figure it out?
+- Agents have no brand loyalty and don't care about dashboard polish. Dev-infra's old moats (DX, docs, community) were **all built for humans**; they evaporate the moment the buyer is an agent.
+- Connectors (e.g. Stripe Projects) turn providers into **interchangeable SKUs** in a catalog. Switching cost for an agent approaches zero → a race to the cheapest → thinning margins.
 
-AI coding agents can write the app code beautifully. They struggle with the operational layer because the relevant knowledge is scattered across docs, blog posts, and a thousand different CLI quirks.
+**When the resource layer commoditizes, profit migrates to the layer that isn't substitutable. Only two things resist commoditization: trust/control, and data/state.** Firth sells that layer.
 
-**Firth packages that operational knowledge into something an agent can read, run, and reason about.**
+The structural opening: an autonomous agent with root, facing a zero-friction platform, has no party with both the incentive and the standing to be the brake / auditor / accountable party. The agent can't audit itself (judge ≠ player); the platform is mis-incentivized (its KPI is to make you do *more*). That vacuum doesn't close as models get stronger — it widens.
 
-## Who Firth is for
+## What Firth is
 
-- Solo builders / vibe coders shipping web products with help from a coding agent (Claude Code, Cursor, Cline, Aider, ...).
-- Small teams that want a sane default stack and don't want to reinvent deploy plumbing.
-- AI agents themselves — Firth's outputs (Skills, CLI errors, lockfiles) are explicitly designed to be agent-consumable.
+A platform where a developer (or their agent) creates an account, then creates **projects**. Each project orchestrates three third-party base resources — **Neon** (Postgres), **S3** (storage), **Fly.io** (compute) — and layers on the high-value control surface:
 
-Firth is **not** trying to be:
+- **Unified secret management** — one boundary; encrypted at rest; never hardcoded into app or agent.
+- **Runtime observability** — agent actions correlated with resource side-effects, per project/branch.
+- **Failure analysis** — cross-stack triage on top of that timeline.
+- **Branching** — per-project branches for safe, isolated change.
 
-- A general-purpose IaC tool (use Terraform / Pulumi).
-- A PaaS (it orchestrates existing PaaS providers; it does not run your code).
-- An "awesome list" of dev tools (lists go stale; Firth ships executable knowledge).
+Firth is an **orchestrator, not a reseller.** It provisions resources under its *own* provider accounts (account-of-record, cost passed through at/near cost), which puts it in the credential and action path *by construction* — but resources are not the profit center. **Integration + governance are the product.** Not charging a resource markup is also what keeps Firth a credible, neutral party rather than a vendor incentivized to make you consume more.
 
-## What's in this repo?
+## Moat — why it holds
 
-This repo holds the **Skills bundle** and project templates — the *knowledge layer* of Firth.
+The most natural party to govern agents is the **harness vendor** (Claude Code hooks, OpenAI, Cursor) — the same "Stripe eats provisioning" threat, one layer up. But buyers won't accept *"the company selling you the autonomous agent also certifies that it's safe"* (judge ≠ player). The only defensible shape is:
 
-```
-firth/
-├── README.md            ← you are here
-├── ARCHITECTURE.md      ← project goals, design rationale, decisions
-├── skills/              ← Anthropic-format Skills that teach agents about specific platforms
-└── templates/           ← project starters for the Firth golden paths (coming soon)
-```
+**Independent + cross-harness + accountable/audit-grade**, anchored on the **credential boundary** as the enforcement chokepoint. Independence is both the moat and exactly the thing a harness vendor can't credibly provide.
 
-The companion **CLI** lives in a separate repo (`firth-cli`, planned). The CLI is what agents and humans actually invoke at runtime; the Skills in this repo teach the agent *how to use the CLI* and *how to reason about the platforms underneath*.
+## Go-to-market — the wedge
 
-## Architecture in one diagram
+**Rule: don't enter as the brake** (push, high trust bar, requires enforcement). **Enter as something people already pull for** (read-only, zero blocking), then sell governance/recovery as the upgrade.
 
-```
-┌────────────────────────────────────────────────────────────────┐
-│  LAYER 1 — Knowledge (this repo)                               │
-│  Skills · Runbooks · Templates · CLAUDE.md / AGENTS.md         │
-│  ↓ ships into the user's project as static files               │
-└────────────────────────────────────────────────────────────────┘
-┌────────────────────────────────────────────────────────────────┐
-│  LAYER 2 — CLI (firth-cli, separate repo)                      │
-│  firth init · deploy · secrets · logs · status · db:*          │
-│  ↓ thin orchestrator over each provider's official CLI/API     │
-└────────────────────────────────────────────────────────────────┘
-┌────────────────────────────────────────────────────────────────┐
-│  LAYER 3 — MCP server (optional, future)                       │
-│  Structured tool calls when CLI text output isn't enough       │
-└────────────────────────────────────────────────────────────────┘
-```
+- **Today's wedge — agent credential exposure.** "Which credentials did the agent touch or leak this week across its whole action surface (chat / code / logs / sandbox)?" — read-only audit. That's a security incident *today*, with budget, independent of whether the agent is in production yet. (See `observe/` for the first read-only scanner.)
+- **Expansion** — observe credential exposure → broker short-lived scoped credentials → become the gate for production actions (the enforcement layer) → governance / audit / recovery.
 
-The full rationale, design decisions, and MVP path are documented in [ARCHITECTURE.md](./ARCHITECTURE.md).
+The rare alignment at the core of this thesis: **the cheapest wedge to enter (credential-exposure audit) and the most defensible moat (credential-boundary enforcement) are the same surface.** Other wedges are merely "on the way"; this one *is* the moat being built.
 
-## Getting started
+## The risk we accept
 
-> The first golden path is in active development:
-> **Next.js frontend + Hono backend + Neon Postgres + Vercel + Railway.**
+**Timing.** Most teams haven't put agents directly into production yet, so the highest-value buyer ("the agent broke prod") isn't born.
 
-Quickstart and installation instructions will land here once `firth-cli` reaches its first preview release.
+- **The bet:** "agents in production" is inevitable within the fundable window (~18–24 months).
+- **Mitigation:** enter at pain that already hurts in dev/CI and lies on the path to production.
+- **Survival line:** can the cheap dev/credential pain sustain us until the production-governance market arrives?
+- **Validation discipline (Mom Test):** count teams that have already *spent time or money* on this problem — not those who say "nice idea." A request to be introduced or shown their current workaround is signal; verbal praise is not.
 
-## Roadmap snapshot
+## Status & roadmap
 
-- [x] Project naming, scope, and architecture decided
-- [ ] First golden path: Next.js + Hono + Neon + Vercel + Railway
-- [ ] First five Skills: stack overview, deploy flow, debug runbook, cost/scaling, handoff
-- [ ] `firth-cli` v0.1: `init`, `deploy`, `secrets`, `logs`
-- [ ] `firth handoff` — generate a context dump for a fresh agent session
-- [ ] Second golden path (TBD based on user feedback)
+- [x] Strategy converged; design spec + Foundation implementation plan written.
+- [x] **Foundation** — control plane on InsForge: auth, metadata schema (projects / branches / resources / secrets) with RLS, AES-256-GCM secret store + the single secret seam, projects API.
+- [ ] Provider adapters: Neon → S3 → Fly.io, with `create project` saga + rollback.
+- [ ] Branching (Neon-native DB branch; shared storage; redeploy compute).
+- [ ] `firth-cli` + provider-skill download + `deploy`.
+- [ ] Observability: agent-action ↔ resource-side-effect correlation + dashboard.
 
-## Companion projects
+## Architecture
 
-- **`firth`** (this repo) — Skills, templates, runbooks. The knowledge layer.
-- **`firth-cli`** (separate repo, planned) — The runtime CLI agents and humans invoke.
+See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the full design — two-layer model, the InsForge mapping, the metadata schema, the provider-adapter interface, the secret seam, branching semantics, and the build order. The dated design spec and implementation plan live under [`docs/superpowers/`](./docs/superpowers/).
 
-## Contributing
+## Naming
 
-We're not accepting general PRs yet. The architecture is still settling. Issues with use-case feedback, missing Skills, or platform requests are very welcome.
-
-## License
-
-MIT (planned).
+**Firth** — Scottish for a narrow inlet where a river meets the sea. A builder's work is the river, the cloud is the sea, and Firth is the channel that carries it out reliably — now also the channel every credential and action flows through.
