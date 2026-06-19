@@ -15,10 +15,25 @@ export class ProjectsRepo {
     return firstOrThrow(data, 'projects') as Project
   }
 
+  async findById(owner: string, id: string): Promise<Project | null> {
+    const { data, error } = await this.db.from('projects').select()
+      .eq('owner', owner).eq('id', id).is('archived_at', null)
+    if (error) throw error
+    return ((data ?? [])[0] as Project) ?? null
+  }
+
   async listByOwner(owner: string): Promise<Project[]> {
-    const { data, error } = await this.db.from('projects').select().eq('owner', owner)
+    const { data, error } = await this.db.from('projects').select()
+      .eq('owner', owner).is('archived_at', null)
     if (error) throw error
     return (data ?? []) as Project[]
+  }
+
+  async archive(owner: string, id: string): Promise<void> {
+    const { error } = await this.db.from('projects')
+      .update({ archived_at: new Date().toISOString(), status: 'deleted' })
+      .eq('owner', owner).eq('id', id)
+    if (error) throw error
   }
 }
 
@@ -47,6 +62,19 @@ export class ResourcesRepo {
       .eq('owner', owner).eq('project_id', projectId).eq('kind', kind)
     if (error) throw error
     return ((data ?? [])[0] as ResourceRow) ?? null
+  }
+
+  async listByProject(owner: string, projectId: string): Promise<ResourceRow[]> {
+    const { data, error } = await this.db.from('resources').select()
+      .eq('owner', owner).eq('project_id', projectId)
+    if (error) throw error
+    return (data ?? []) as ResourceRow[]
+  }
+
+  async markStatus(owner: string, id: string, status: string): Promise<void> {
+    const { error } = await this.db.from('resources')
+      .update({ status }).eq('owner', owner).eq('id', id)
+    if (error) throw error
   }
 }
 
@@ -80,6 +108,13 @@ export class BranchesRepo {
     return ((data ?? [])[0] as BranchRow) ?? null
   }
 
+  async findById(owner: string, id: string): Promise<BranchRow | null> {
+    const { data, error } = await this.db.from('branches').select()
+      .eq('owner', owner).eq('id', id).is('archived_at', null)
+    if (error) throw error
+    return ((data ?? [])[0] as BranchRow) ?? null
+  }
+
   async create(row: {
     project_id: string; owner: string; name: string
     parent_branch_id: string | null; is_default: boolean; status: string
@@ -90,8 +125,16 @@ export class BranchesRepo {
   }
 
   async listByProject(owner: string, projectId: string): Promise<BranchRow[]> {
-    const { data, error } = await this.db.from('branches').select().eq('owner', owner).eq('project_id', projectId)
+    const { data, error } = await this.db.from('branches').select()
+      .eq('owner', owner).eq('project_id', projectId).is('archived_at', null)
     if (error) throw error
     return (data ?? []) as BranchRow[]
+  }
+
+  async archive(owner: string, id: string): Promise<void> {
+    const { error } = await this.db.from('branches')
+      .update({ archived_at: new Date().toISOString(), status: 'deleted' })
+      .eq('owner', owner).eq('id', id)
+    if (error) throw error
   }
 }
