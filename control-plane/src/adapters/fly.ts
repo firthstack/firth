@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import type { HttpClient, ProviderAdapter, ResourceHandle, SecretBundle, UsageSnapshot } from './types.js'
+import type { ComputeAdapter, DeployOpts, DeployResult, HttpClient, ResourceHandle, SecretBundle, UsageSnapshot } from './types.js'
 
 const FLY_BASE = 'https://api.machines.dev/v1'
 
@@ -10,7 +10,7 @@ export function mkAppName(projectName: string, rand: string): string {
   return `firth-${slug}-${rand}`
 }
 
-export class FlyAdapter implements ProviderAdapter {
+export class FlyAdapter implements ComputeAdapter {
   readonly kind = 'fly' as const
   readonly branchModel = 'redeploy' as const
   private baseUrl: string
@@ -46,4 +46,22 @@ export class FlyAdapter implements ProviderAdapter {
   async deleteBranch(): Promise<void> { /* no per-branch resource: storage shared, compute redeploys */ }
   async mintCredentials(): Promise<SecretBundle> { return {} }
   async readUsage(): Promise<UsageSnapshot> { return {} }
+
+  async deploy(handle: ResourceHandle, opts: DeployOpts): Promise<DeployResult> {
+    const ref = handle.providerRef as FlyRef
+    const config: Record<string, unknown> = {
+      image: opts.image,
+      env: opts.env,
+      guest: { cpu_kind: 'shared', cpus: 1, memory_mb: 256 },
+    }
+    if (opts.port) {
+      config.services = [{
+        protocol: 'tcp',
+        internal_port: opts.port,
+        ports: [{ port: 443, handlers: ['tls', 'http'] }, { port: 80, handlers: ['http'] }],
+      }]
+    }
+    const data = await this.call('POST', `/apps/${ref.flyApp}/machines`, { config })
+    return { machineId: data.id, url: `https://${ref.flyApp}.fly.dev` }
+  }
 }

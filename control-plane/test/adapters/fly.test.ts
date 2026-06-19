@@ -52,3 +52,34 @@ describe('FlyAdapter', () => {
     expect(await adapter.readUsage(h)).toEqual({})
   })
 })
+
+describe('FlyAdapter.deploy', () => {
+  test('creates a machine with image + env, returns machineId + url', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/apps/firth-x-abc/machines'), body: { id: 'm-123', state: 'created' } },
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    const handle = { kind: 'fly' as const, providerRef: { flyApp: 'firth-x-abc', orgSlug: 'org' } }
+    const out = await adapter.deploy(handle, { image: 'nginx:alpine', env: { DATABASE_URL: 'postgresql://c' }, port: 80 })
+    expect(out).toEqual({ machineId: 'm-123', url: 'https://firth-x-abc.fly.dev' })
+    const body = JSON.parse(calls[0].init.body)
+    expect(body.config.image).toBe('nginx:alpine')
+    expect(body.config.env.DATABASE_URL).toBe('postgresql://c')
+    expect(body.config.guest).toEqual({ cpu_kind: 'shared', cpus: 1, memory_mb: 256 })
+    expect(body.config.services[0].internal_port).toBe(80)
+  })
+
+  test('omits services when no port is given', async () => {
+    const { http, calls } = fakeHttp([{ match: (u, i) => i.method === 'POST', body: { id: 'm-1' } }])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    await adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'img', env: {} })
+    expect(JSON.parse(calls[0].init.body).config.services).toBeUndefined()
+  })
+
+  test('non-2xx deploy throws with status only', async () => {
+    const { http } = fakeHttp([{ match: (u, i) => i.method === 'POST', status: 422, body: {} }])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    await expect(adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'x', env: {} }))
+      .rejects.toThrow(/fly POST \/apps\/a\/machines failed: 422/)
+  })
+})

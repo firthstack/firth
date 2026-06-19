@@ -19,3 +19,10 @@ export interface ProviderAdapter {
   mintCredentials(handle: ResourceHandle, branchRef?: string): Promise<SecretBundle>
   readUsage(handle: ResourceHandle): Promise<UsageSnapshot>
 }
+
+export type DeployOpts = { image: string; env: Record<string, string>; port?: number }
+export type DeployResult = { machineId: string; url: string }
+
+export interface ComputeAdapter extends ProviderAdapter {
+  deploy(handle: ResourceHandle, opts: DeployOpts): Promise<DeployResult>
+}
