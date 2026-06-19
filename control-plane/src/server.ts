@@ -30,12 +30,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return { uid, token, db: deps.dataForToken(token) }
   }
 
+  // best-effort: never let an event-write failure change the response
+  async function emit(db: DataClient, uid: string, projectId: string, branchId: string | null, kind: string, payload: Record<string, unknown>) {
+    try { await new EventsRepo(db).record({ project_id: projectId, owner: uid, branch_id: branchId, source: 'resource', kind, payload }) }
+    catch { /* swallow */ }
+  }
+
   app.post('/projects', async (req, reply) => {
     const { uid, token, db } = await auth(req)
     const name = (req.body as any)?.name
     if (!name) return reply.code(400).send({ error: 'name is required' })
     const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
     const out = await new ProvisioningService(db, deps.cfg, adapters).provisionProject(uid, name)
+    await emit(db, uid, out.project.id, out.defaultBranch.id, 'project.create', { name, resources: out.resources?.map((r: any) => r.kind) ?? [] })
     return reply.code(201).send(out)
   })
 
@@ -53,6 +60,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const from = (req.body as any)?.from ?? 'main'
     const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
     const out = await new BranchService(db, deps.cfg, adapters).createBranch(uid, projectId, name, from)
+    await emit(db, uid, projectId, out.branch.id, 'branch.create', { name: out.branch.name, from })
     return reply.code(201).send(out)
   })
 
@@ -85,6 +93,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const out = await new DeployService(db, deps.cfg, adapters).deploy(uid, projectId, {
       image: body.image, from: body.from, port: body.port,
     })
+    await emit(db, uid, projectId, null, 'deploy', { machineId: out.machineId, url: out.url })
     return reply.send(out)
   })
 

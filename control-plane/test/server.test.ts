@@ -181,3 +181,35 @@ test('POST /events rejects an invalid source', async () => {
     payload: { events: [{ source: 'hacker', kind: 'x' }] } })
   expect(r.statusCode).toBe(400)
 })
+
+test('POST /projects emits a resource event onto the timeline', async () => {
+  const db = fakeData()
+  const fakeNeon = {
+    kind: 'neon', branchModel: 'native',
+    async provision(name: string) { return { kind: 'neon', providerRef: { neonProjectId: `np-${name}`, defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' } } },
+    async destroy() {}, async createBranch() { return 'br-x' },
+    async mintCredentials() { return { DATABASE_URL: 'postgresql://conn' } }, async readUsage() { return {} },
+  }
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const created = await app.inject({ method: 'POST', url: '/projects', headers: { authorization: 'Bearer good' }, payload: { name: 'demo' } })
+  const pid = created.json().project.id
+  const list = await app.inject({ method: 'GET', url: `/projects/${pid}/events`, headers: { authorization: 'Bearer good' } })
+  expect(list.json().events.map((e: any) => e.kind)).toContain('project.create')
+})
+
+test('POST /projects/:id/deploy emits a resource event onto the timeline', async () => {
+  const db = fakeData()
+  db.tables.branches.push({ id: 'b-main', owner: 'uid-1', project_id: 'p1', name: 'main', is_default: true, neon_branch_ref: 'br', status: 'active' })
+  db.tables.resources.push({ id: 'r', owner: 'uid-1', project_id: 'p1', kind: 'fly', provider_ref: { flyApp: 'app', orgSlug: 'org' }, status: 'active' })
+  const fly = {
+    kind: 'fly', branchModel: 'redeploy',
+    async provision() { return { kind: 'fly', providerRef: {} } }, async destroy() {},
+    async createBranch() { return null }, async deleteBranch() {}, async mintCredentials() { return {} }, async readUsage() { return {} },
+    async deploy(_h: any, opts: any) { return { machineId: 'm-9', url: `https://app.fly.dev` } },
+  }
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fly as any] })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/deploy', headers: { authorization: 'Bearer good' }, payload: { image: 'nginx', port: 80 } })
+  expect(r.statusCode).toBe(200)
+  const list = await app.inject({ method: 'GET', url: '/projects/p1/events', headers: { authorization: 'Bearer good' } })
+  expect(list.json().events.map((e: any) => e.kind)).toContain('deploy')
+})
