@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AuthScreen } from './views/AuthScreen'
 import { Projects } from './views/Projects'
 import { ProjectDetail } from './views/ProjectDetail'
@@ -29,7 +29,7 @@ export default function App({ auth, makeApi }: { auth: Auth; makeApi: (getToken:
   const dropToAuth = useCallback(() => { setToken(null); setUser(null); setView({ name: 'projects' }) }, [])
 
   // Wrap the api so any 401 from the control plane drops the session back to the auth screen.
-  const api = useCallback(() => {
+  const api = useMemo(() => {
     const base = makeApi(() => tokenRef.current)
     return new Proxy(base, {
       get(t, prop) {
@@ -42,11 +42,11 @@ export default function App({ auth, makeApi }: { auth: Auth; makeApi: (getToken:
           })
       },
     })
-  }, [makeApi, dropToAuth])()
+  }, [makeApi, dropToAuth])
 
-  async function logout() {
+  const logout = useCallback(async () => {
     try { await auth.signOut() } finally { dropToAuth() }
-  }
+  }, [auth, dropToAuth])
 
   if (!ready) return <p className="firth-dim">loading...</p>
   if (!token) {
