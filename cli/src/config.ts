@@ -55,3 +55,17 @@ export function clearProjectLink(cwd = process.cwd()): void {
   const p = lpath(cwd)
   if (existsSync(p)) unlinkSync(p)
 }
+
+// Append any missing entries to the project's ./.gitignore (creating it if absent).
+// Idempotent: entries already present are left alone. Returns the entries it added.
+export function ensureGitignore(cwd: string, entries: string[]): string[] {
+  const p = join(cwd, '.gitignore')
+  const existing = existsSync(p) ? readFileSync(p, 'utf8') : ''
+  const have = new Set(existing.split('\n').map((l) => l.trim()))
+  const missing = entries.filter((e) => !have.has(e))
+  if (missing.length === 0) return []
+  const prefix = existing && !existing.endsWith('\n') ? '\n' : ''
+  const block = `${prefix}\n# Firth: agent skills installed by \`firth\` / \`npx skills add\` (regenerable, not source)\n${missing.join('\n')}\n`
+  writeFileSync(p, existing + block)
+  return missing
+}
