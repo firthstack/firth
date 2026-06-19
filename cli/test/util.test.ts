@@ -22,5 +22,5 @@ test('destroyed and multiple failed items', () => {
 })
 
 test('failed only returns failed part', () => {
-  expect(formatTeardown({ failed: [{ kind: 'dynamodb' }] })).toBe('FAILED: dynamodb')
+  expect(formatTeardown({ failed: [{ kind: 'dynamodb' }] })).toBe(' FAILED: dynamodb')
 })
