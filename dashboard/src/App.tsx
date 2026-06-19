@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AuthScreen } from './views/AuthScreen'
+import { Home } from './views/Home'
 import { Projects } from './views/Projects'
 import { ProjectDetail } from './views/ProjectDetail'
 import { Row, TButton } from './ui/Terminal'
@@ -13,6 +14,7 @@ export default function App({ auth, makeApi }: { auth: Auth; makeApi: (getToken:
   const [user, setUser] = useState<AuthUser | null>(null)
   const [view, setView] = useState<View>({ name: 'projects' })
   const [ready, setReady] = useState(false)
+  const [landing, setLanding] = useState<'home' | 'auth'>('home')
   const tokenRef = useRef<string | null>(null)
   tokenRef.current = token
 
@@ -26,7 +28,7 @@ export default function App({ auth, makeApi }: { auth: Auth; makeApi: (getToken:
     return () => { active = false }
   }, [auth])
 
-  const dropToAuth = useCallback(() => { setToken(null); setUser(null); setView({ name: 'projects' }) }, [])
+  const dropToAuth = useCallback(() => { setToken(null); setUser(null); setView({ name: 'projects' }); setLanding('home') }, [])
 
   // Wrap the api so any 401 from the control plane drops the session back to the auth screen.
   const api = useMemo(() => {
@@ -50,7 +52,8 @@ export default function App({ auth, makeApi }: { auth: Auth; makeApi: (getToken:
 
   if (!ready) return <p className="firth-dim">loading...</p>
   if (!token) {
-    return <AuthScreen auth={auth} onAuthed={(t, u) => { setToken(t); setUser(u) }} />
+    if (landing === 'home') return <Home onGetStarted={() => setLanding('auth')} />
+    return <AuthScreen auth={auth} onAuthed={(t, u) => { setToken(t); setUser(u) }} onBack={() => setLanding('home')} />
   }
   return (
     <div>

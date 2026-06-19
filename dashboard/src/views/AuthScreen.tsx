@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Panel, Row, TButton, TInput } from '../ui/Terminal'
 import type { Auth, AuthUser } from '../auth/auth'
 
-export function AuthScreen({ auth, onAuthed }: { auth: Auth; onAuthed: (token: string, user: AuthUser) => void }) {
+export function AuthScreen({ auth, onAuthed, onBack }: { auth: Auth; onAuthed: (token: string, user: AuthUser) => void; onBack?: () => void }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -40,6 +40,11 @@ export function AuthScreen({ auth, onAuthed }: { auth: Auth; onAuthed: (token: s
 
   return (
     <Panel title="firth // access">
+      {onBack && (
+        <Row>
+          <TButton onClick={onBack}>[ ← back ]</TButton>
+        </Row>
+      )}
       <Row>
         <TButton onClick={() => { setMode('signin'); setError(null); setNotice(null) }} disabled={mode === 'signin'}>[sign in]</TButton>
         <TButton onClick={() => { setMode('signup'); setError(null); setNotice(null) }} disabled={mode === 'signup'}>[create account]</TButton>
