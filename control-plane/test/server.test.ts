@@ -11,7 +11,7 @@ const cfg = { keks, currentKek: current, insforge: { baseUrl: 'x', anonKey: 'a',
 //   eq(col, null)  → matches nothing (mirrors col=eq.null, not IS NULL)
 //   is(col, null)  → matches rows where col is null/undefined
 function fakeData() {
-  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [] }
+  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [], events: [] }
   return { tables, from(t: string) {
     const filters: Array<(r: any) => boolean> = []
     let mode: 'insert' | 'select' | 'update' = 'select'
@@ -20,7 +20,7 @@ function fakeData() {
     const api: any = {
       insert(v: any) {
         mode = 'insert'
-        const row = { id: `${t}-${tables[t].length}`, ...v }
+        const row = { id: `${t}-${tables[t].length}`, created_at: String(tables[t].length).padStart(10, '0'), ...v }
         tables[t].push(row)
         insertedRow = row
         return api
@@ -157,5 +157,27 @@ test('POST /projects/:id/deploy deploys the image via DeployService', async () =
 test('POST /projects/:id/deploy requires an image', async () => {
   const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => fakeData() as any, adaptersForToken: () => [] })
   const r = await app.inject({ method: 'POST', url: '/projects/p1/deploy', headers: { authorization: 'Bearer good' }, payload: {} })
+  expect(r.statusCode).toBe(400)
+})
+
+test('POST then GET /projects/:id/events records + lists newest-first', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const post = await app.inject({ method: 'POST', url: '/projects/p1/events', headers: { authorization: 'Bearer good' },
+    payload: { events: [
+      { source: 'resource', kind: 'project.create', payload: { name: 'demo' } },
+      { source: 'agent', kind: 'agent.network', payload: { fingerprint: 'gh ••••e5f6' }, branch: null },
+    ] } })
+  expect(post.statusCode).toBe(201)
+  expect(post.json().recorded).toBe(2)
+  const list = await app.inject({ method: 'GET', url: '/projects/p1/events', headers: { authorization: 'Bearer good' } })
+  expect(list.statusCode).toBe(200)
+  expect(list.json().events.map((e: any) => e.kind)).toContain('agent.network')
+})
+
+test('POST /events rejects an invalid source', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => fakeData() as any })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/events', headers: { authorization: 'Bearer good' },
+    payload: { events: [{ source: 'hacker', kind: 'x' }] } })
   expect(r.statusCode).toBe(400)
 })

@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import type { FirthConfig } from './config.js'
 import { resolveUid, UnauthorizedError } from './auth.js'
 import type { DataClient } from './db/types.js'
-import { ProjectsRepo, SecretsRepo, BranchesRepo } from './db/repos.js'
+import { ProjectsRepo, SecretsRepo, BranchesRepo, EventsRepo } from './db/repos.js'
 import { decryptSecret } from './crypto/secrets.js'
 import { ProvisioningService } from './services/provisioning.js'
 import { BranchService } from './services/branches.js'
@@ -86,6 +86,30 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       image: body.image, from: body.from, port: body.port,
     })
     return reply.send(out)
+  })
+
+  app.post('/projects/:id/events', async (req, reply) => {
+    const { uid, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const events = ((req.body as any)?.events ?? []) as Array<any>
+    if (!Array.isArray(events) || events.some((e) => e.source !== 'agent' && e.source !== 'resource')) {
+      return reply.code(400).send({ error: 'each event needs source agent|resource' })
+    }
+    const repo = new EventsRepo(db)
+    for (const e of events) {
+      await repo.record({ project_id: projectId, owner: uid, branch_id: e.branch ?? null, source: e.source, kind: String(e.kind), payload: e.payload ?? {} })
+    }
+    return reply.code(201).send({ recorded: events.length })
+  })
+
+  app.get('/projects/:id/events', async (req, reply) => {
+    const { uid, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const q = req.query as any
+    const events = await new EventsRepo(db).listByProject(uid, projectId, {
+      branch: q.branch, limit: q.limit ? Number(q.limit) : undefined,
+    })
+    return reply.send({ events })
   })
 
   return app
