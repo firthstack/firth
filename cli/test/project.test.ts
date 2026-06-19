@@ -2,7 +2,7 @@ import { mkdtempSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { projectCreate, projectList, projectDelete } from '../src/commands/project.js'
+import { projectCreate, projectLink, projectList, projectDelete } from '../src/commands/project.js'
 import { readProjectLink, writeProjectLink } from '../src/config.js'
 import { FirthApi } from '../src/api.js'
 
@@ -19,7 +19,28 @@ test('project create POSTs, links the dir, prints the id', async () => {
   const code = await projectCreate(['my-app'], d as any)
   expect(code).toBe(0)
   expect(readProjectLink(dir)?.projectId).toBe('p9')
+  expect(readProjectLink(dir)?.branch).toEqual({ id: 'b', name: 'main' }) // auto-switched to the default branch
   expect(d.out.join('\n')).toMatch(/p9/)
+  expect(d.out.join('\n')).toMatch(/on branch main/)
+})
+
+test('project link auto-switches to the default branch', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-'))
+  const api = { listBranches: async (_id: string) => [{ id: 'bm', name: 'main', is_default: true }, { id: 'bd', name: 'dev', is_default: false }] } as any
+  const d = depsWith(api, dir)
+  expect(await projectLink(['p7'], d as any)).toBe(0)
+  expect(readProjectLink(dir)?.projectId).toBe('p7')
+  expect(readProjectLink(dir)?.branch).toEqual({ id: 'bm', name: 'main' })
+  expect(d.out.join('\n')).toMatch(/on branch main/)
+})
+
+test('project link still links the id when the branch lookup fails (offline / not logged in)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-'))
+  const api = { listBranches: async () => { throw new Error('not logged in') } } as any
+  const d = depsWith(api, dir)
+  expect(await projectLink(['p7'], d as any)).toBe(0)
+  expect(readProjectLink(dir)?.projectId).toBe('p7')
+  expect(readProjectLink(dir)?.branch).toBeUndefined()
 })
 
 test('project list prints names', async () => {
