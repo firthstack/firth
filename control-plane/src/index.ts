@@ -1,5 +1,5 @@
 import { loadConfig } from './config.js'
-import { userClient, verifyToken } from './insforge.js'
+import { userClient, verifyToken, authProxy } from './insforge.js'
 import { buildServer } from './server.js'
 import { buildAdapters } from './adapters/factory.js'
 
@@ -12,6 +12,7 @@ export async function main() {
     verifyToken: (token) => verifyToken(cfg, token),
     dataForToken: (token) => userClient(cfg, token).database,
     adaptersForToken: () => buildAdapters(cfg),
+    authProxy: authProxy(cfg),
   })
   const port = Number(process.env.PORT ?? 8080)
   await app.listen({ port, host: '0.0.0.0' })

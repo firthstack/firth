@@ -11,12 +11,14 @@ import { DeployService } from './services/deploy.js'
 import { TeardownService } from './services/teardown.js'
 import { publicResourceView } from './services/resource-view.js'
 import type { ProviderAdapter } from './adapters/types.js'
+import type { AuthProxy } from './insforge.js'
 
 export type ServerDeps = {
   cfg: FirthConfig
   verifyToken: (token: string) => Promise<{ id: string } | null>
   dataForToken: (token: string) => DataClient
   adaptersForToken?: (token: string) => ProviderAdapter[]
+  authProxy?: AuthProxy
 }
 
 export function buildServer(deps: ServerDeps): FastifyInstance {
@@ -159,6 +161,37 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       branch: q.branch, limit: q.limit ? Number(q.limit) : undefined,
     })
     return reply.send({ events })
+  })
+
+  // ---------- Auth proxy routes (unauthenticated — how you obtain a token) ----------
+
+  app.post('/auth/login', async (req, reply) => {
+    const { email, password } = (req.body as any) ?? {}
+    if (!email || !password) return reply.code(400).send({ error: 'email and password are required' })
+    try { return reply.send(await deps.authProxy!.login(email, password)) }
+    catch (e) { return reply.code(401).send({ error: e instanceof Error ? e.message : 'login failed' }) }
+  })
+
+  app.post('/auth/signup', async (req, reply) => {
+    const { email, password, name, redirectTo } = (req.body as any) ?? {}
+    if (!email || !password) return reply.code(400).send({ error: 'email and password are required' })
+    try { return reply.send(await deps.authProxy!.signUp(email, password, name, redirectTo)) }
+    catch (e) { return reply.code(400).send({ error: e instanceof Error ? e.message : 'sign-up failed' }) }
+  })
+
+  app.post('/auth/resend-verification', async (req, reply) => {
+    const { email, redirectTo } = (req.body as any) ?? {}
+    if (!email) return reply.code(400).send({ error: 'email is required' })
+    try { await deps.authProxy!.resendVerification(email, redirectTo); return reply.send({ ok: true }) }
+    catch (e) { return reply.code(400).send({ error: e instanceof Error ? e.message : 'resend failed' }) }
+  })
+
+  app.get('/auth/me', async (req, reply) => {
+    const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '')
+    if (!token) return reply.code(401).send({ error: 'unauthorized' })
+    const user = await deps.authProxy!.me(token)
+    if (!user) return reply.code(401).send({ error: 'unauthorized' })
+    return reply.send({ user })
   })
 
   return app

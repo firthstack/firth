@@ -2,6 +2,43 @@ import { createClient, createAdminClient } from '@insforge/sdk'
 import type { FirthConfig } from './config.js'
 import type { DataClient } from './db/types.js'
 
+export type AuthProxy = {
+  login(email: string, password: string): Promise<{ token: string; user: { id: string; email: string } }>
+  signUp(email: string, password: string, name?: string, redirectTo?: string): Promise<{ token: string | null; needsVerification: boolean; user: { id: string; email: string } | null }>
+  resendVerification(email: string, redirectTo?: string): Promise<void>
+  me(token: string): Promise<{ id: string; email: string } | null>
+}
+
+export function authProxy(cfg: FirthConfig): AuthProxy {
+  const anon = createClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey })
+  return {
+    async login(email, password) {
+      const { data, error } = await anon.auth.signInWithPassword({ email, password })
+      if (error) throw error
+      if (!data?.accessToken) throw new Error('email not verified')
+      return { token: data.accessToken, user: { id: data.user.id, email: data.user.email } }
+    },
+    async signUp(email, password, name, redirectTo) {
+      const { data, error } = await anon.auth.signUp({ email, password, name, redirectTo })
+      if (error) throw error
+      if (!data) throw new Error('sign-up failed')
+      const token = (data as any).accessToken ?? null
+      const needsVerification = !!(data as any).requireEmailVerification || !token
+      const user = data.user ? { id: data.user.id, email: data.user.email } : null
+      return { token, needsVerification, user }
+    },
+    async resendVerification(email, redirectTo) {
+      const { error } = await anon.auth.resendVerificationEmail({ email, redirectTo })
+      if (error) throw error
+    },
+    async me(token) {
+      const c = createClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey, accessToken: token })
+      const { data } = await c.auth.getCurrentUser()   // invalid token → no user → null (treated as 401)
+      return data?.user ? { id: data.user.id, email: data.user.email } : null
+    },
+  }
+}
+
 /**
  * The auth-API subset consumed by Firth's auth middleware.
  * Narrow interface so callers never depend on the full SDK Auth class.

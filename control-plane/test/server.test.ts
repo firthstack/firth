@@ -300,3 +300,74 @@ it('sends an Access-Control-Allow-Origin header for the Vite dev origin', async 
   const res = await app.inject({ method: 'GET', url: '/projects', headers: { authorization: 'Bearer good', origin: 'http://localhost:5173' } })
   expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173')
 })
+
+// ---- Auth proxy route tests ----
+
+const fakeAuthProxy = {
+  async login(email: string, _password: string) {
+    if (email === 'fail@x.co') throw new Error('email not verified')
+    return { token: 'tok-1', user: { id: 'u1', email: 'a@b.co' } }
+  },
+  async signUp(_email: string, _password: string) {
+    return { needsVerification: true, token: null, user: null }
+  },
+  async resendVerification(_email: string) {},
+  async me(token: string) {
+    if (token !== 'good') return null
+    return { id: 'u1', email: 'a@b.co' }
+  },
+}
+
+test('POST /auth/login returns token + user on success', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/login', payload: { email: 'a@b.co', password: 'pw' } })
+  expect(r.statusCode).toBe(200)
+  expect(r.json()).toEqual({ token: 'tok-1', user: { id: 'u1', email: 'a@b.co' } })
+})
+
+test('POST /auth/login missing password → 400', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/login', payload: { email: 'a@b.co' } })
+  expect(r.statusCode).toBe(400)
+})
+
+test('POST /auth/login bad creds → 401 with error message', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/login', payload: { email: 'fail@x.co', password: 'pw' } })
+  expect(r.statusCode).toBe(401)
+  expect(r.json()).toEqual({ error: 'email not verified' })
+})
+
+test('POST /auth/signup returns needsVerification response', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/signup', payload: { email: 'new@b.co', password: 'pw' } })
+  expect(r.statusCode).toBe(200)
+  expect(r.json()).toEqual({ needsVerification: true, token: null, user: null })
+})
+
+test('POST /auth/resend-verification with email → 200 { ok: true }', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/resend-verification', payload: { email: 'a@b.co' } })
+  expect(r.statusCode).toBe(200)
+  expect(r.json()).toEqual({ ok: true })
+})
+
+test('POST /auth/resend-verification missing email → 400', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/resend-verification', payload: {} })
+  expect(r.statusCode).toBe(400)
+})
+
+test('GET /auth/me with valid Bearer token → 200 { user }', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'GET', url: '/auth/me', headers: { authorization: 'Bearer good' } })
+  expect(r.statusCode).toBe(200)
+  expect(r.json()).toEqual({ user: { id: 'u1', email: 'a@b.co' } })
+})
+
+test('GET /auth/me with no Authorization header → 401', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'GET', url: '/auth/me' })
+  expect(r.statusCode).toBe(401)
+  expect(r.json()).toEqual({ error: 'unauthorized' })
+})
