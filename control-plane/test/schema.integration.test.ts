@@ -22,6 +22,11 @@ test('RLS is enabled on every metadata table', () => {
   expect(rows.length).toBe(4)
 })
 
+test('events table exists with RLS', () => {
+  const rows = query("select relname from pg_class where relrowsecurity=true and relname='events'")
+  expect(rows.length).toBe(1)
+})
+
 test('every owner-policy carries USING and WITH CHECK', () => {
   const rows = query(
     "select policyname, qual, with_check from pg_policies where schemaname='public' and tablename in ('projects','branches','resources','secrets')")

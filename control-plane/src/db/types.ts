@@ -14,6 +14,12 @@ export type BranchRow = {
   neon_branch_ref: string | null; status: string
 }
 
+export type NewEventRow = {
+  project_id: string; owner: string; branch_id: string | null
+  source: 'agent' | 'resource'; kind: string; payload: Record<string, unknown>
+}
+export type EventRow = NewEventRow & { id: string; created_at: string }
+
 // The subset of @insforge/sdk's `database` query builder we depend on.
 export interface QueryBuilder {
   insert(values: object | object[]): QueryBuilder

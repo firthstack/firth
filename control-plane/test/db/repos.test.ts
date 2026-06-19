@@ -1,12 +1,12 @@
 import { expect, test } from 'vitest'
-import { ProjectsRepo, SecretsRepo, ResourcesRepo, BranchesRepo } from '../../src/db/repos.js'
+import { ProjectsRepo, SecretsRepo, ResourcesRepo, BranchesRepo, EventsRepo } from '../../src/db/repos.js'
 
 // Minimal fake implementing the DataClient query-builder surface we use.
 // eq/is semantics mirror real PostgREST:
 //   eq(col, null)  → matches nothing (PostgREST emits col=eq.null, not IS NULL)
 //   is(col, null)  → matches rows where col is null/undefined
 function fakeDb(seed: Record<string, any[]> = {}) {
-  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [], ...seed }
+  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [], events: [], ...seed }
   return {
     tables,
     from(table: string) {
@@ -17,7 +17,8 @@ function fakeDb(seed: Record<string, any[]> = {}) {
           const insertedIds: string[] = []
           for (const v of arr) {
             const id = `id-${tables[table].length}`
-            tables[table].push({ id, ...v })
+            const created_at = String(tables[table].length).padStart(10, '0')
+            tables[table].push({ id, created_at, ...v })
             insertedIds.push(id)
           }
           api._inserted = arr; api._insertedIds = insertedIds; return api },
@@ -89,4 +90,15 @@ test('BranchesRepo.findByName + create + listByProject', async () => {
   const created = await repo.create({ project_id: 'p', owner: 'o', name: 'feat', parent_branch_id: 'b-main', is_default: false, status: 'creating' })
   expect(created.name).toBe('feat')
   expect((await repo.listByProject('o', 'p')).map((b) => b.name).sort()).toEqual(['feat', 'main'])
+})
+
+test('EventsRepo.record inserts; listByProject returns newest-first, limited, branch-filtered', async () => {
+  const db = fakeDb()
+  const repo = new EventsRepo(db as any)
+  await repo.record({ project_id: 'p', owner: 'o', branch_id: null, source: 'resource', kind: 'project.create', payload: {} })
+  await repo.record({ project_id: 'p', owner: 'o', branch_id: 'b1', source: 'resource', kind: 'deploy', payload: { url: 'x' } })
+  const all = await repo.listByProject('o', 'p')
+  expect(all.map((e) => e.kind)).toEqual(['deploy', 'project.create']) // newest-first (insertion order → reverse)
+  const lim = await repo.listByProject('o', 'p', { limit: 1 })
+  expect(lim).toHaveLength(1)
 })

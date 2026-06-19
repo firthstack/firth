@@ -1,4 +1,4 @@
-import type { DataClient, NewSecretRow, Project, SecretRow, ResourceRow, BranchRow } from './types.js'
+import type { DataClient, NewSecretRow, Project, SecretRow, ResourceRow, BranchRow, EventRow, NewEventRow } from './types.js'
 
 export function firstOrThrow<T>(data: T[] | null, what: string): T {
   if (!data || data.length === 0) throw new Error(`${what} insert returned no row`)
@@ -47,6 +47,26 @@ export class ResourcesRepo {
       .eq('owner', owner).eq('project_id', projectId).eq('kind', kind)
     if (error) throw error
     return ((data ?? [])[0] as ResourceRow) ?? null
+  }
+}
+
+export class EventsRepo {
+  constructor(private db: DataClient) {}
+
+  async record(row: NewEventRow): Promise<void> {
+    const { error } = await this.db.from('events').insert(row).select()
+    if (error) throw error
+  }
+
+  async listByProject(owner: string, projectId: string, opts: { branch?: string | null; limit?: number } = {}): Promise<EventRow[]> {
+    let q = this.db.from('events').select().eq('owner', owner).eq('project_id', projectId)
+    if (typeof opts.branch === 'string') q = q.eq('branch_id', opts.branch)
+    const { data, error } = await q
+    if (error) throw error
+    const rows = (data ?? []) as EventRow[]
+    // newest-first; app-side because the fake (and v1) don't use SQL ORDER/LIMIT. Pagination is a follow-up.
+    const sorted = [...rows].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
+    return sorted.slice(0, opts.limit ?? 50)
   }
 }
 
