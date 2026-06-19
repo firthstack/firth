@@ -1,9 +1,9 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { projectCreate, projectList } from '../src/commands/project.js'
-import { readProjectLink } from '../src/config.js'
+import { projectCreate, projectList, projectDelete } from '../src/commands/project.js'
+import { readProjectLink, writeProjectLink } from '../src/config.js'
 import { FirthApi } from '../src/api.js'
 
 function depsWith(api: FirthApi, dir: string) {
@@ -28,4 +28,36 @@ test('project list prints names', async () => {
   const d = depsWith(api, dir)
   expect(await projectList([], d as any)).toBe(0)
   expect(d.out.join('\n')).toMatch(/a.*b/s)
+})
+
+test('project delete without --yes returns 1 and does not call deleteProject', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-'))
+  writeProjectLink('p1', dir)
+  let called = false
+  const api = { deleteProject: async (_id: string) => { called = true; return {} } } as any
+  const d = depsWith(api, dir)
+  const code = await projectDelete([], d as any)
+  expect(code).toBe(1)
+  expect(called).toBe(false)
+  expect(d.out.join('\n')).toMatch(/destroy|confirm/i)
+})
+
+test('project delete with --yes calls deleteProject and clears link', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-'))
+  writeProjectLink('p1', dir)
+  const calls: string[] = []
+  const api = {
+    deleteProject: async (id: string) => {
+      calls.push(id)
+      return { project: {}, teardown: { destroyed: ['neon', 'fly'], failed: [] } }
+    }
+  } as any
+  const d = depsWith(api, dir)
+  const code = await projectDelete(['--yes'], d as any)
+  expect(code).toBe(0)
+  expect(calls).toEqual(['p1'])
+  expect(readProjectLink(dir)).toBeNull()
+  const output = d.out.join('\n')
+  expect(output).toMatch(/deleted project p1/)
+  expect(output).toMatch(/neon/)
 })
