@@ -9,7 +9,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
-  const [from, setFrom] = useState('')
+  const [from, setFrom] = useState('main')
   const [confirmBranch, setConfirmBranch] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
@@ -51,7 +51,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
               <Row key={`${r.kind}-${i}`}>
                 <span style={{ flex: 1 }}>{r.kind}</span>
                 <span className="firth-dim">{r.status}</span>
-                <span className="firth-dim">{Object.values(r.provider_ref).map(String).join(' ')}</span>
+                <span className="firth-dim">{Object.entries(r.provider_ref).map(([k, v]) => `${k}=${String(v)}`).join(' ')}</span>
               </Row>
             ))}
           </Panel>

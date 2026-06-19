@@ -31,8 +31,8 @@ describe('ProjectDetail', () => {
     render(<ProjectDetail api={fakeApi()} projectId="p1" onBack={vi.fn()} />)
     expect(await screen.findByText('main')).toBeInTheDocument()
     expect(screen.getByText('dev')).toBeInTheDocument()
-    expect(screen.getByText(/neon/i)).toBeInTheDocument()
-    expect(screen.getByText(/np-1/)).toBeInTheDocument()
+    expect(screen.getByText('neon')).toBeInTheDocument()
+    expect(screen.getByText(/neonProjectId=/)).toBeInTheDocument()
   })
 
   it('the default branch row exposes no delete control', async () => {
@@ -58,8 +58,21 @@ describe('ProjectDetail', () => {
     await screen.findByText('main')
     await userEvent.click(screen.getByRole('button', { name: /create branch/i }))
     await userEvent.type(screen.getByLabelText(/^name$/i), 'feature')
+    await userEvent.clear(screen.getByLabelText(/^from$/i))
     await userEvent.type(screen.getByLabelText(/^from$/i), 'main')
     await userEvent.click(screen.getByRole('button', { name: /^\[ok\]$/i }))
     await waitFor(() => expect(createBranch).toHaveBeenCalledWith('p1', 'feature', 'main'))
+  })
+
+  it('submitting with empty from defaults parent to main', async () => {
+    const createBranch = vi.fn(async () => ({}))
+    const getProject = vi.fn().mockResolvedValue(detail)
+    render(<ProjectDetail api={fakeApi({ createBranch, getProject })} projectId="p1" onBack={vi.fn()} />)
+    await screen.findByText('main')
+    await userEvent.click(screen.getByRole('button', { name: /create branch/i }))
+    await userEvent.type(screen.getByLabelText(/^name$/i), 'empty-from-test')
+    await userEvent.clear(screen.getByLabelText(/^from$/i))
+    await userEvent.click(screen.getByRole('button', { name: /^\[ok\]$/i }))
+    await waitFor(() => expect(createBranch).toHaveBeenCalledWith('p1', 'empty-from-test', 'main'))
   })
 })
