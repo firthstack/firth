@@ -31,7 +31,11 @@ export class ProvisioningService {
     const results = await Promise.allSettled(
       this.adapters.map(async (adapter): Promise<RollbackEntry> => {
         const ins = await this.db.from('resources')
-          .insert({ project_id: project.id, owner, kind: adapter.kind, status: 'provisioning', provider_ref: {} })
+          .insert({
+            project_id: project.id, owner, kind: adapter.kind,
+            branch_id: adapter.kind === 'fly' ? defaultBranch.id : null,
+            status: 'provisioning', provider_ref: {},
+          })
           .select()
         if (ins.error) throw ins.error
         const resourceId = (firstOrThrow(ins.data, 'resource') as { id: string }).id

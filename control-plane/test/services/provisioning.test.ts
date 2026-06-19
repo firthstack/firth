@@ -228,4 +228,18 @@ describe('ProvisioningService.provisionProject', () => {
     // s3 never completed provision so it gets no destroy call
     expect((s3A as any).destroyed).not.toContain('s3')
   })
+
+  test('fly resource is tagged with the default branch id; neon/s3 are not', async () => {
+    const db = fakeDb()
+    const svc = new ProvisioningService(db as any, cfg, [mk('neon'), mk('s3'), mk('fly')])
+    await svc.provisionProject('owner-1', 'proj')
+    const rows = db.tables.resources
+    const fly = rows.find((r: any) => r.kind === 'fly')
+    const neon = rows.find((r: any) => r.kind === 'neon')
+    const s3 = rows.find((r: any) => r.kind === 's3')
+    const defaultBranch = db.tables.branches.find((b: any) => b.is_default)
+    expect(fly.branch_id).toBe(defaultBranch.id)
+    expect(neon.branch_id == null).toBe(true)
+    expect(s3.branch_id == null).toBe(true)
+  })
 })
