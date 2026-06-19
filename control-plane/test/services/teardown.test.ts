@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, test, expect } from 'vitest'
 import { TeardownService } from '../../src/services/teardown.js'
 import { NotFoundError, ConflictError } from '../../src/auth.js'
+import type { ProviderAdapter } from '../../src/adapters/types.js'
 
 function fakeData() {
   const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [], events: [] }
@@ -39,6 +40,28 @@ function okNeon(spy: { destroyed: number; deletedBranch: string | null }) {
     async deleteBranch(_h: any, ref: string) { spy.deletedBranch = ref },
     async mintCredentials() { return {} }, async readUsage() { return {} },
   }
+}
+
+function neonAdapter(overrides: Partial<ProviderAdapter> = {}): ProviderAdapter {
+  return {
+    kind: 'neon', branchModel: 'native',
+    async provision() { return { kind: 'neon', providerRef: {} } },
+    async destroy() {},
+    async createBranch() { return 'br-x' },
+    async deleteBranch() {},
+    async mintCredentials() { return {} }, async readUsage() { return {} },
+    ...overrides,
+  } as any
+}
+
+function flySpy(destroyed: string[]): ProviderAdapter {
+  return {
+    kind: 'fly', branchModel: 'redeploy',
+    async provision() { return { kind: 'fly', providerRef: {} } },
+    async destroy(h: any) { destroyed.push((h.providerRef as any).flyApp) },
+    async createBranch() { return null }, async deleteBranch() {},
+    async mintCredentials() { return {} }, async readUsage() { return {} },
+  } as any
 }
 
 describe('TeardownService.deleteProject', () => {
@@ -108,4 +131,29 @@ describe('TeardownService.deleteBranch', () => {
     const dev = (await db.from('branches').insert({ project_id: 'other', owner: 'uid-1', name: 'dev', parent_branch_id: 'b0', is_default: false, neon_branch_ref: 'br-dev', status: 'active' }).then((r: any) => r)).data[0]
     await expect(new TeardownService(db, cfg, []).deleteBranch('uid-1', 'p1', dev.id)).rejects.toBeInstanceOf(NotFoundError)
   })
+})
+
+test('deleteBranch destroys the branch fly app + neon branch and marks the fly resource destroyed', async () => {
+  const flyDestroyed: string[] = []; const neonDeleted: string[] = []
+  const db = fakeData()
+  db.tables.projects.push({ id: 'p', owner: 'o', name: 'proj', status: 'active' })
+  db.tables.branches.push({ id: 'b-feat', owner: 'o', project_id: 'p', name: 'feature', is_default: false, neon_branch_ref: 'br-feat', status: 'active' })
+  db.tables.resources.push({ id: 'r-neon', owner: 'o', project_id: 'p', kind: 'neon', branch_id: null, provider_ref: { neonProjectId: 'np' }, status: 'active' })
+  db.tables.resources.push({ id: 'r-fly', owner: 'o', project_id: 'p', kind: 'fly', branch_id: 'b-feat', provider_ref: { flyApp: 'a-feat' }, status: 'active' })
+  const neon = neonAdapter({ async deleteBranch(_h: any, ref: string) { neonDeleted.push(ref) } } as any)  // file's neon fake
+  await new TeardownService(db as any, cfg, [neon, flySpy(flyDestroyed)]).deleteBranch('o', 'p', 'b-feat')
+  expect(neonDeleted).toEqual(['br-feat'])
+  expect(flyDestroyed).toEqual(['a-feat'])
+  expect(db.tables.resources.find((r: any) => r.id === 'r-fly').status).toBe('destroyed')
+})
+
+test('deleteProject destroys every branch\'s fly app and skips an already-destroyed one', async () => {
+  const flyDestroyed: string[] = []
+  const db = fakeData()
+  db.tables.projects.push({ id: 'p', owner: 'o', name: 'proj', status: 'active' })
+  db.tables.resources.push({ id: 'r-neon', owner: 'o', project_id: 'p', kind: 'neon', branch_id: null, provider_ref: { neonProjectId: 'np' }, status: 'active' })
+  db.tables.resources.push({ id: 'r-fly-main', owner: 'o', project_id: 'p', kind: 'fly', branch_id: 'b-main', provider_ref: { flyApp: 'a-main' }, status: 'active' })
+  db.tables.resources.push({ id: 'r-fly-gone', owner: 'o', project_id: 'p', kind: 'fly', branch_id: 'b-old', provider_ref: { flyApp: 'a-old' }, status: 'destroyed' })
+  await new TeardownService(db as any, cfg, [neonAdapter(), flySpy(flyDestroyed)]).deleteProject('o', 'p')
+  expect(flyDestroyed).toEqual(['a-main'])  // a-old skipped (already destroyed)
 })
