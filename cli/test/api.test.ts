@@ -25,3 +25,21 @@ test('non-2xx throws with the API error string', async () => {
   const api = new FirthApi('https://cp', 'tok', fn as any)
   await expect(api.listProjects()).rejects.toThrow(/401.*unauthorized/)
 })
+
+test('deleteProject sends DELETE /projects/:id', async () => {
+  const { fn, calls } = fetcher([{ match: (u, i) => i.method === 'DELETE' && u.endsWith('/projects/p1'), body: { project: {}, teardown: { destroyed: [], failed: [] } } }])
+  const api = new FirthApi('https://cp', 'tok', fn as any)
+  const out = await api.deleteProject('p1')
+  expect(calls[0].init.method).toBe('DELETE')
+  expect(calls[0].url).toBe('https://cp/projects/p1')
+  expect(out.project).toBeDefined()
+})
+
+test('deleteBranch sends DELETE /projects/:projectId/branches/:branchId', async () => {
+  const { fn, calls } = fetcher([{ match: (u, i) => i.method === 'DELETE' && u.endsWith('/projects/p1/branches/b1'), body: { project: {}, teardown: { destroyed: [], failed: [] } } }])
+  const api = new FirthApi('https://cp', 'tok', fn as any)
+  const out = await api.deleteBranch('p1', 'b1')
+  expect(calls[0].init.method).toBe('DELETE')
+  expect(calls[0].url).toBe('https://cp/projects/p1/branches/b1')
+  expect(out.project).toBeDefined()
+})

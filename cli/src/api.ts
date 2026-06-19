@@ -48,4 +48,6 @@ export class FirthApi {
   postEvents(projectId: string, events: unknown[]) {
     return this.req('POST', `/projects/${projectId}/events`, { events })
   }
+  deleteProject(id: string) { return this.req('DELETE', `/projects/${id}`) }
+  deleteBranch(projectId: string, branchId: string) { return this.req('DELETE', `/projects/${projectId}/branches/${branchId}`) }
 }
