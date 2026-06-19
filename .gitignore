@@ -1,5 +1,8 @@
 .firth/
 
+# Internal product/strategy notes — never publish
+why-firth-works.md
+
 # Python
 __pycache__/
 *.pyc

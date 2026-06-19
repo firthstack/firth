@@ -1,70 +1,94 @@
 # Firth
 
-> A builder platform for agents and developers: spin up a project with real cloud resources, and get unified secrets, runtime observability, and failure analysis on top — the things an autonomous agent actually needs to operate safely.
+> One control plane for a project's cloud resources. Firth provisions a Postgres database, S3-compatible storage, and compute for your project, and hands them back through a single CLI and one credential file — so you (or your AI agent) can build against real infrastructure without wiring up each provider by hand.
 
-**Status:** Early WIP. The control-plane **Foundation** is built (auth, metadata + RLS, encrypted secret store, projects API on [InsForge](https://insforge.dev)); provider adapters, branching, and observability are next. Not yet for production.
+**Status:** Early WIP — usable end to end (provision, secrets, branching, deploy), not yet hardened for production.
 
 ---
 
-## The bet (why now)
+## What Firth gives you
 
-In the agent era, base infrastructure — databases, compute, storage — is commoditizing:
+Create a project and Firth automatically provisions three base resources, ready to build against:
 
-- Agents have no brand loyalty and don't care about dashboard polish. Dev-infra's old moats (DX, docs, community) were **all built for humans**; they evaporate the moment the buyer is an agent.
-- Connectors (e.g. Stripe Projects) turn providers into **interchangeable SKUs** in a catalog. Switching cost for an agent approaches zero → a race to the cheapest → thinning margins.
+- **Postgres database** ([Neon](https://neon.tech)) — your app's relational DB, connected directly (no ORM layer in front).
+- **S3-compatible storage** ([Tigris](https://www.tigrisdata.com)) — object/blob storage.
+- **Compute** ([Fly.io](https://fly.io)) — where your container runs.
 
-**When the resource layer commoditizes, profit migrates to the layer that isn't substitutable. Only two things resist commoditization: trust/control, and data/state.** Firth sells that layer.
+On top of those resources:
 
-The structural opening: an autonomous agent with root, facing a zero-friction platform, has no party with both the incentive and the standing to be the brake / auditor / accountable party. The agent can't audit itself (judge ≠ player); the platform is mis-incentivized (its KPI is to make you do *more*). That vacuum doesn't close as models get stronger — it widens.
+- **Unified secrets** — one `firth secrets` writes every connection credential into a local `.env`. Credentials are never hardcoded into your app or your agent.
+- **Branching** — each branch gets its **own isolated database and its own compute** (the storage bucket is shared), so you can make risky changes in isolation and merge back when verified.
+- **Deploy** — ship a container image to the current branch's compute with one command.
+- **Observability** — a timeline of agent actions correlated with resource side-effects, per project and branch.
 
-## What Firth is
+Firth talks to the providers under its own accounts and passes resource cost through — you manage everything through Firth, not through each provider's console.
 
-A platform where a developer (or their agent) creates an account, then creates **projects**. Each project orchestrates three third-party base resources — **Neon** (Postgres), **S3** (storage), **Fly.io** (compute) — and layers on the high-value control surface:
+## Install
 
-- **Unified secret management** — one boundary; encrypted at rest; never hardcoded into app or agent.
-- **Runtime observability** — agent actions correlated with resource side-effects, per project/branch.
-- **Failure analysis** — cross-stack triage on top of that timeline.
-- **Branching** — per-project branches for safe, isolated change.
+```bash
+npm install -g firth
+# or run without installing:
+npx firth --help
+```
 
-Firth is an **orchestrator, not a reseller.** It provisions resources under its *own* provider accounts (account-of-record, cost passed through at/near cost), which puts it in the credential and action path *by construction* — but resources are not the profit center. **Integration + governance are the product.** Not charging a resource markup is also what keeps Firth a credible, neutral party rather than a vendor incentivized to make you consume more.
+## Quickstart
 
-## Moat — why it holds
+```bash
+# 1. Sign in (use --api-url to point at a non-default control plane)
+firth login --email you@example.com --password ******
 
-The most natural party to govern agents is the **harness vendor** (Claude Code hooks, OpenAI, Cursor) — the same "Stripe eats provisioning" threat, one layer up. But buyers won't accept *"the company selling you the autonomous agent also certifies that it's safe"* (judge ≠ player). The only defensible shape is:
+# 2. Create a project — provisions DB + storage + compute, leaves you on the default branch `main`
+firth project create my-app
 
-**Independent + cross-harness + accountable/audit-grade**, anchored on the **credential boundary** as the enforcement chokepoint. Independence is both the moat and exactly the thing a harness vendor can't credibly provide.
+# 3. Write the current branch's credentials into ./.env
+firth secrets
 
-## Go-to-market — the wedge
+# 4. Build your app against ./.env, then deploy a container image
+firth deploy --image <image-url>
+```
 
-**Rule: don't enter as the brake** (push, high trust bar, requires enforcement). **Enter as something people already pull for** (read-only, zero blocking), then sell governance/recovery as the upgrade.
+`firth status` shows your login state, linked project, and current branch. `firth --version` prints the version.
 
-- **Today's wedge — agent credential exposure.** "Which credentials did the agent touch or leak this week across its whole action surface (chat / code / logs / sandbox)?" — read-only audit. That's a security incident *today*, with budget, independent of whether the agent is in production yet. (See `observe/` for the first read-only scanner.)
-- **Expansion** — observe credential exposure → broker short-lived scoped credentials → become the gate for production actions (the enforcement layer) → governance / audit / recovery.
+## Database & migrations
 
-The rare alignment at the core of this thesis: **the cheapest wedge to enter (credential-exposure audit) and the most defensible moat (credential-boundary enforcement) are the same surface.** Other wedges are merely "on the way"; this one *is* the moat being built.
+You connect **directly** to the Postgres database using the `DATABASE_URL` from `firth secrets`. Keep a **`migrations/` directory at your project root** to store and version your schema changes — this lets you replay the same schema on a branch database and re-apply it on `main` after a merge.
 
-## The risk we accept
+## Branching — isolate risky changes
 
-**Timing.** Most teams haven't put agents directly into production yet, so the highest-value buyer ("the agent broke prod") isn't born.
+Before a high-risk change (a schema migration, a data backfill, a risky refactor), do the work on a branch and merge it back when you're confident.
 
-- **The bet:** "agents in production" is inevitable within the fundable window (~18–24 months).
-- **Mitigation:** enter at pain that already hurts in dev/CI and lies on the path to production.
-- **Survival line:** can the cheap dev/credential pain sustain us until the production-governance market arrives?
-- **Validation discipline (Mom Test):** count teams that have already *spent time or money* on this problem — not those who say "nice idea." A request to be introduced or shown their current workaround is signal; verbal praise is not.
+```bash
+firth branch create my-change   # new isolated DB branch + its own compute (storage stays shared)
+firth branch switch my-change   # then `firth secrets` to refresh ./.env for this branch
+# ... run migrations against the branch DB, firth deploy, validate ...
+```
 
-## Status & roadmap
+Each branch has its own compute app, so multiple branches run in parallel without disturbing each other.
 
-- [x] Strategy converged; design spec + Foundation implementation plan written.
-- [x] **Foundation** — control plane on InsForge: auth, metadata schema (projects / branches / resources / secrets) with RLS, AES-256-GCM secret store + the single secret seam, projects API.
-- [ ] Provider adapters: Neon → S3 → Fly.io, with `create project` saga + rollback.
-- [ ] Branching (Neon-native DB branch; shared storage; redeploy compute).
-- [ ] the firth CLI + provider-skill download + `deploy`.
-- [ ] Observability: agent-action ↔ resource-side-effect correlation + dashboard.
+**Merging is done in your own code repo** (Firth does not auto-merge): merge the branch's code and its migration files into `main`, switch back (`firth branch switch main` → `firth secrets`), re-run the migrations against `main`'s database, and redeploy.
+
+## Using Firth with an AI agent
+
+Firth ships an agent skill under [`skills/firth/`](./skills/firth/) describing the full workflow (provisioning, the credential seam, branching, deploy). Point your agent at it so it treats `./.env` as the only source of resource credentials and tracks schema changes under `migrations/`.
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| [`control-plane/`](./control-plane/) | The API server (the brain): provisioning orchestration, the secret seam, the provider adapters. |
+| [`cli/`](./cli/) | The `firth` command-line interface. |
+| [`dashboard/`](./dashboard/) | The web dashboard (terminal-style UI). |
+| [`skills/firth/`](./skills/firth/) | The agent skill. |
+| [`observe/`](./observe/) | The agent-action observability hook. |
 
 ## Architecture
 
-See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the full design — two-layer model, the InsForge mapping, the metadata schema, the provider-adapter interface, the secret seam, branching semantics, and the build order. The dated design spec and implementation plan live under [`docs/superpowers/`](./docs/superpowers/).
+See **[ARCHITECTURE.md](./ARCHITECTURE.md)** for the design: the two-layer model, the provider-adapter interface, the metadata schema, the secret seam, and branching semantics. The dated design specs and implementation plans live under [`docs/superpowers/`](./docs/superpowers/).
 
 ## Naming
 
-**Firth** — Scottish for a narrow inlet where a river meets the sea. A builder's work is the river, the cloud is the sea, and Firth is the channel that carries it out reliably — now also the channel every credential and action flows through.
+**Firth** — Scottish for a narrow inlet where a river meets the sea. A builder's work is the river, the cloud is the sea, and Firth is the channel that carries it out reliably.
+
+## License
+
+TBD.
