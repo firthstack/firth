@@ -45,7 +45,7 @@ export class FirthApi {
     const q = qs.toString()
     return this.req('GET', `/projects/${projectId}/events${q ? `?${q}` : ''}`).then((r) => r.events as any[])
   }
-  postEvents(projectId: string, events: unknown[]) {
+  postEvents(projectId: string, events: unknown[]): Promise<{ recorded: number; skipped: number }> {
     return this.req('POST', `/projects/${projectId}/events`, { events })
   }
   deleteProject(id: string) { return this.req('DELETE', `/projects/${id}`) }
