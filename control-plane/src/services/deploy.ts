@@ -11,15 +11,15 @@ export class DeployService {
     const fly = this.adapters.find((a) => a.kind === 'fly') as ComputeAdapter | undefined
     if (!fly?.deploy) throw new Error('fly adapter not configured')
 
-    const resource = await new ResourcesRepo(this.db).findByKind(owner, projectId, 'fly')
-    if (!resource) throw new Error('project has no fly resource')
-
     const branches = new BranchesRepo(this.db)
     const all = await branches.listByProject(owner, projectId)
     const target = opts.from
       ? all.find((b) => b.name === opts.from || b.id === opts.from)
       : (all.find((b) => b.is_default) ?? all[0])
     if (!target) throw new Error(`branch "${opts.from ?? '(default)'}" not found`)
+
+    const resource = await new ResourcesRepo(this.db).findByKindForBranch(owner, projectId, target.id, 'fly')
+    if (!resource) throw new Error('branch has no fly resource')
 
     const secrets = new SecretsRepo(this.db)
     const rows = [

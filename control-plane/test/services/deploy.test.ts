@@ -30,12 +30,12 @@ function flyAdapter(captured: any): ProviderAdapter {
     async provision() { return { kind: 'fly', providerRef: {} } }, async destroy() {},
     async createBranch() { return null }, async deleteBranch() {},
     async mintCredentials() { return {} }, async readUsage() { return {} },
-    async deploy(_h: any, opts: any) { captured.opts = opts; return { machineId: 'm-1', url: 'https://app.fly.dev' } },
+    async deploy(h: any, opts: any) { captured.handle = h; captured.opts = opts; return { machineId: 'm-1', url: 'https://app.fly.dev' } },
   } as any
 }
 
 const seeded = () => fakeDb({
-  resources: [{ id: 'r', owner: 'o', project_id: 'p', kind: 'fly', provider_ref: { flyApp: 'app', orgSlug: 'org' }, status: 'active' }],
+  resources: [{ id: 'r', owner: 'o', project_id: 'p', kind: 'fly', branch_id: 'b-main', provider_ref: { flyApp: 'app', orgSlug: 'org' }, status: 'active' }],
   branches: [{ id: 'b-main', owner: 'o', project_id: 'p', name: 'main', is_default: true, neon_branch_ref: 'br', status: 'active' }],
   secrets: [
     { id: 's1', owner: 'o', project_id: 'p', branch_id: null, name: 'AWS_ACCESS_KEY_ID', ...enc('tid_x') },
@@ -61,5 +61,32 @@ describe('DeployService.deploy', () => {
   test('throws when no fly adapter is configured', async () => {
     await expect(new DeployService(seeded() as any, cfg, []).deploy('o', 'p', { image: 'x' }))
       .rejects.toThrow(/fly adapter/i)
+  })
+
+  test('deploys to the target branch\'s fly app and merges that branch\'s secrets', async () => {
+    const cap: any = {}
+    const db = fakeDb({
+      branches: [
+        { id: 'b-main', owner: 'o', project_id: 'p', name: 'main', is_default: true, neon_branch_ref: 'br-main', status: 'active' },
+        { id: 'b-feat', owner: 'o', project_id: 'p', name: 'feature', is_default: false, neon_branch_ref: 'br-feat', status: 'active' },
+      ],
+      resources: [
+        { id: 'r-main', owner: 'o', project_id: 'p', kind: 'fly', branch_id: 'b-main', provider_ref: { flyApp: 'a-main', orgSlug: 'o' }, status: 'active' },
+        { id: 'r-feat', owner: 'o', project_id: 'p', kind: 'fly', branch_id: 'b-feat', provider_ref: { flyApp: 'a-feat', orgSlug: 'o' }, status: 'active' },
+      ],
+      secrets: [],
+    })
+    const out = await new DeployService(db as any, cfg, [flyAdapter(cap)]).deploy('o', 'p', { image: 'img', from: 'feature' })
+    expect(cap.handle.providerRef.flyApp).toBe('a-feat')
+    expect(out.url).toBe('https://app.fly.dev')
+  })
+
+  test('throws a clear error when the target branch has no fly resource', async () => {
+    const db = fakeDb({
+      branches: [{ id: 'b-feat', owner: 'o', project_id: 'p', name: 'feature', is_default: false, neon_branch_ref: 'br-feat', status: 'active' }],
+      resources: [],
+    })
+    await expect(new DeployService(db as any, cfg, [flyAdapter({})]).deploy('o', 'p', { image: 'img', from: 'feature' }))
+      .rejects.toThrow('branch has no fly resource')
   })
 })

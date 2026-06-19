@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { deploy } from '../src/commands/deploy.js'
-import { writeProjectLink } from '../src/config.js'
+import { writeProjectLink, setCurrentBranch } from '../src/config.js'
 
 function deps(dir: string, api: any) {
   const out: string[] = []
@@ -33,4 +33,16 @@ test('deploy errors when not linked', async () => {
   const d = deps(dir, {})
   expect(await deploy(['--image', 'x'], d as any)).toBe(1)
   expect(d.out.join('\n')).toMatch(/not linked|project link/i)
+})
+
+test('sends the current branch from the link as branch', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-'))
+  writeProjectLink('p1', dir)
+  setCurrentBranch({ id: 'b-feat', name: 'feature' }, dir)
+  const captured: any = {}
+  const api = { deploy: async (_id: string, opts: any) => { captured.opts = opts; return { machineId: 'm', url: 'u' } } }
+  const d = deps(dir, api)
+  const code = await deploy(['--image', 'img'], d as any)
+  expect(code).toBe(0)
+  expect(captured.opts.branch).toBe('b-feat')
 })
