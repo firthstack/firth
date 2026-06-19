@@ -35,4 +35,7 @@ export class FirthApi {
     const q = branch ? `?branch=${encodeURIComponent(branch)}` : ''
     return this.req('GET', `/projects/${projectId}/secrets${q}`).then((r) => r.secrets as Record<string, string>)
   }
+  deploy(projectId: string, opts: { image: string; from?: string; port?: number }) {
+    return this.req('POST', `/projects/${projectId}/deploy`, opts)
+  }
 }

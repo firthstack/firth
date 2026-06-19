@@ -5,6 +5,7 @@ import { projectCreate, projectLink, projectList } from './commands/project.js'
 import { branchCreate, branchList } from './commands/branch.js'
 import { secrets } from './commands/secrets.js'
 import { skillsPull } from './commands/skills.js'
+import { deploy } from './commands/deploy.js'
 
 export type CliDeps = {
   print: (s: string) => void
@@ -25,6 +26,7 @@ Commands:
   branch list               List the linked project's branches
   secrets                   Fetch the linked project's secrets into .env (--branch <id>)
   skills pull               Install the firth skill into ./.claude/skills
+  deploy                    Deploy --image <url> to the project's compute (--from, --port)
   --help                    Show this help`
 
 // Command handlers registered by later tasks. Each: (argv, deps) => Promise<number>.
@@ -39,6 +41,7 @@ COMMANDS['branch create'] = branchCreate
 COMMANDS['branch list'] = branchList
 COMMANDS['secrets'] = secrets
 COMMANDS['skills pull'] = skillsPull
+COMMANDS['deploy'] = deploy
 
 export async function route(argv: string[], deps: CliDeps): Promise<number> {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
