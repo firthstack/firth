@@ -32,6 +32,19 @@ function fakeData() {
         insertedRow = row
         return api
       },
+      upsert(v: any, opts?: { onConflict?: string; ignoreDuplicates?: boolean }) {
+        mode = 'insert'
+        const dk = (v as any).dedup_key
+        // model UNIQUE(owner, project_id, dedup_key): NULL keys never conflict
+        const conflict = opts?.ignoreDuplicates && dk != null && tables[t].some(
+          (r) => r.owner === (v as any).owner && r.project_id === (v as any).project_id && r.dedup_key === dk,
+        )
+        if (conflict) { insertedRow = undefined; return api }
+        const row = { id: `${t}-${tables[t].length}`, created_at: String(tables[t].length).padStart(10, '0'), ...v }
+        tables[t].push(row)
+        insertedRow = row
+        return api
+      },
       update(v: any) { mode = 'update'; updatePayload = v; return api },
       // Intentionally a no-op: keeps the preceding mode so `insert().select()` returns the
       // inserted row (what the repos/saga rely on). `update().select()` is never used here;
@@ -50,7 +63,7 @@ function fakeData() {
           for (const row of tables[t]) if (filters.every((fn) => fn(row))) Object.assign(row, updatePayload)
           return res({ data: [], error: null })
         }
-        if (mode === 'insert') return res({ data: [insertedRow], error: null })
+        if (mode === 'insert') return res({ data: insertedRow ? [insertedRow] : [], error: null })
         return res({ data: tables[t].filter((r) => filters.every((fn) => fn(r))), error: null })
       },
     }
@@ -430,4 +443,25 @@ test('GET /auth/me with no Authorization header → 401', async () => {
   const r = await app.inject({ method: 'GET', url: '/auth/me' })
   expect(r.statusCode).toBe(401)
   expect(r.json()).toEqual({ error: 'unauthorized' })
+})
+
+test('POST /events dedups by dedup_key: second identical key is skipped', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const ev = { source: 'agent', kind: 'agent.network', payload: { a: 1 }, dedup_key: 'abc123' }
+  const r1 = await app.inject({ method: 'POST', url: '/projects/p1/events', headers: { authorization: 'Bearer good' }, payload: { events: [ev] } })
+  expect(r1.statusCode).toBe(201)
+  expect(r1.json()).toEqual({ recorded: 1, skipped: 0 })
+  const r2 = await app.inject({ method: 'POST', url: '/projects/p1/events', headers: { authorization: 'Bearer good' }, payload: { events: [ev] } })
+  expect(r2.json()).toEqual({ recorded: 0, skipped: 1 })
+  expect(db.tables.events).toHaveLength(1)
+})
+
+test('POST /events without dedup_key always inserts (resource/legacy events)', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const payload = { events: [{ source: 'resource', kind: 'deploy', payload: {} }, { source: 'resource', kind: 'deploy', payload: {} }] }
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/events', headers: { authorization: 'Bearer good' }, payload })
+  expect(r.json()).toEqual({ recorded: 2, skipped: 0 })
+  expect(db.tables.events).toHaveLength(2)
 })

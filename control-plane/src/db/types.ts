@@ -18,12 +18,14 @@ export type BranchRow = {
 export type NewEventRow = {
   project_id: string; owner: string; branch_id: string | null
   source: 'agent' | 'resource'; kind: string; payload: Record<string, unknown>
+  dedup_key?: string | null
 }
 export type EventRow = NewEventRow & { id: string; created_at: string }
 
 // The subset of @insforge/sdk's `database` query builder we depend on.
 export interface QueryBuilder {
   insert(values: object | object[]): QueryBuilder
+  upsert(values: object | object[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }): QueryBuilder
   update(values: object): QueryBuilder
   select(): QueryBuilder
   eq(column: string, value: unknown): QueryBuilder
