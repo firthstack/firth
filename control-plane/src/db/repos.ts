@@ -88,9 +88,17 @@ export class ResourcesRepo {
 export class EventsRepo {
   constructor(private db: DataClient) {}
 
-  async record(row: NewEventRow): Promise<void> {
+  async record(row: NewEventRow): Promise<{ inserted: boolean }> {
+    if (row.dedup_key) {
+      const { data, error } = await this.db.from('events')
+        .upsert(row, { onConflict: 'owner,project_id,dedup_key', ignoreDuplicates: true })
+        .select()
+      if (error) throw error
+      return { inserted: (data ?? []).length > 0 }
+    }
     const { error } = await this.db.from('events').insert(row).select()
     if (error) throw error
+    return { inserted: true }
   }
 
   async listByProject(owner: string, projectId: string, opts: { branch?: string | null; limit?: number } = {}): Promise<EventRow[]> {

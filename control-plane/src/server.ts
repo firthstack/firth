@@ -154,10 +154,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(400).send({ error: 'each event needs source agent|resource' })
     }
     const repo = new EventsRepo(db)
+    let recorded = 0
     for (const e of events) {
-      await repo.record({ project_id: projectId, owner: uid, branch_id: e.branch ?? null, source: e.source, kind: String(e.kind), payload: e.payload ?? {} })
+      const { inserted } = await repo.record({
+        project_id: projectId, owner: uid, branch_id: e.branch ?? null,
+        source: e.source, kind: String(e.kind), payload: e.payload ?? {},
+        dedup_key: e.dedup_key ?? null,
+      })
+      if (inserted) recorded++
     }
-    return reply.code(201).send({ recorded: events.length })
+    return reply.code(201).send({ recorded, skipped: events.length - recorded })
   })
 
   app.get('/projects/:id/events', async (req, reply) => {
