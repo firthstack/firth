@@ -15,7 +15,9 @@ export async function secrets(argv: string[], deps: CliDeps & { makeApi?: () => 
   const branches = await api.listBranches(link.projectId)
   const target = values.branch
     ? branches.find((b: any) => b.name === values.branch || b.id === values.branch)
-    : (branches.find((b: any) => b.is_default) ?? branches[0])
+    : link.branch
+      ? branches.find((b: any) => b.id === link.branch!.id)
+      : (branches.find((b: any) => b.is_default) ?? branches[0])
   if (!target) { deps.print(`branch "${values.branch ?? '(default)'}" not found`); return 1 }
   // The seam returns EITHER project-scoped (no branch) OR branch-scoped; merge both for a complete .env.
   const project = await api.getSecrets(link.projectId)
