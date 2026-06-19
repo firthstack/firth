@@ -38,4 +38,14 @@ export class FirthApi {
   deploy(projectId: string, opts: { image: string; from?: string; port?: number }) {
     return this.req('POST', `/projects/${projectId}/deploy`, opts)
   }
+  listEvents(projectId: string, opts: { branch?: string; limit?: number } = {}) {
+    const qs = new URLSearchParams()
+    if (opts.branch) qs.set('branch', opts.branch)
+    if (opts.limit) qs.set('limit', String(opts.limit))
+    const q = qs.toString()
+    return this.req('GET', `/projects/${projectId}/events${q ? `?${q}` : ''}`).then((r) => r.events as any[])
+  }
+  postEvents(projectId: string, events: unknown[]) {
+    return this.req('POST', `/projects/${projectId}/events`, { events })
+  }
 }

@@ -6,6 +6,8 @@ import { branchCreate, branchList } from './commands/branch.js'
 import { secrets } from './commands/secrets.js'
 import { skillsPull } from './commands/skills.js'
 import { deploy } from './commands/deploy.js'
+import { events } from './commands/events.js'
+import { observeSync } from './commands/observe.js'
 
 export type CliDeps = {
   print: (s: string) => void
@@ -27,6 +29,8 @@ Commands:
   secrets                   Fetch the linked project's secrets into .env (--branch <id>)
   skills pull               Install the firth skill into ./.claude/skills
   deploy                    Deploy --image <url> to the project's compute (--from, --port)
+  events                    Show the project's action↔side-effect timeline (--branch, --limit)
+  observe sync              Upload local observe-hook findings (.firth/audit.jsonl) to the timeline
   --help                    Show this help`
 
 // Command handlers registered by later tasks. Each: (argv, deps) => Promise<number>.
@@ -42,6 +46,8 @@ COMMANDS['branch list'] = branchList
 COMMANDS['secrets'] = secrets
 COMMANDS['skills pull'] = skillsPull
 COMMANDS['deploy'] = deploy
+COMMANDS['events'] = events
+COMMANDS['observe sync'] = observeSync
 
 export async function route(argv: string[], deps: CliDeps): Promise<number> {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
