@@ -282,6 +282,23 @@ test('GET /projects/:id surfaces fly provider_ref flyApp + orgSlug (not stripped
   expect(ref.orgSlug).toBe('my-org')
 })
 
+test('GET /projects/:id returns branch_id on fly resources (no credential key stripped)', async () => {
+  const db = fakeData()
+  const project = (await db.from('projects').insert({ owner: 'uid-1', name: 'bp', status: 'active' }).then((r: any) => r)).data[0]
+  await db.from('resources').insert({
+    owner: 'uid-1', project_id: project.id, kind: 'fly', branch_id: 'b-main',
+    provider_ref: { flyApp: 'firth-bp-ab12', orgSlug: 'my-org', credentialKey: 'SECRET' }, status: 'active',
+  })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const res = await app.inject({ method: 'GET', url: `/projects/${project.id}`, headers: { authorization: 'Bearer good' } })
+  expect(res.statusCode).toBe(200)
+  const flyRes = res.json().resources.find((r: any) => r.kind === 'fly')
+  expect(flyRes.branch_id).toBe('b-main')
+  // credential key not in whitelist must still be dropped
+  expect(flyRes.provider_ref.credentialKey).toBeUndefined()
+  expect(flyRes.provider_ref.flyApp).toBe('firth-bp-ab12')
+})
+
 test('GET /projects/:id for an unknown project → 404', async () => {
   const db = fakeData()
   const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })

@@ -117,6 +117,31 @@ describe('ProjectDetail', () => {
     await waitFor(() => expect(createBranch).toHaveBeenCalledWith('p1', 'feature', 'main'))
   })
 
+  // ---- per-branch compute card ---------------------------------------------
+
+  it('compute card renders one entry per fly resource labeled by branch name', async () => {
+    const multiFlyDetail = {
+      project: { id: 'p1', name: 'first', status: 'active' },
+      branches: [
+        { id: 'b-main', name: 'main', is_default: true, neon_branch_ref: 'br-main', status: 'active' },
+        { id: 'b-feat', name: 'feature', is_default: false, neon_branch_ref: 'br-feat', status: 'active' },
+      ],
+      resources: [
+        { kind: 'neon', status: 'active', provider_ref: { neonProjectId: 'np' } },
+        { kind: 'fly', status: 'active', branch_id: 'b-main', provider_ref: { flyApp: 'app-main', orgSlug: 'my-org' } },
+        { kind: 'fly', status: 'active', branch_id: 'b-feat', provider_ref: { flyApp: 'app-feat', orgSlug: 'my-org' } },
+      ],
+    }
+    const api = fakeApi({ getProject: vi.fn(async () => multiFlyDetail) })
+    render(<ProjectDetail api={api} projectId="p1" onBack={vi.fn()} />)
+    // both fly apps must render
+    expect(await screen.findByText('app-main')).toBeInTheDocument()
+    expect(screen.getByText('app-feat')).toBeInTheDocument()
+    // each labeled by its branch name (branch names also appear in the branches panel, so use getAllByText)
+    expect(screen.getAllByText('main').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('feature').length).toBeGreaterThan(0)
+  })
+
   it('submitting with empty from defaults parent to main', async () => {
     const createBranch = vi.fn(async () => ({}))
     const getProject = vi.fn().mockResolvedValue(detail)
