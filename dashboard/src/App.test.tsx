@@ -36,7 +36,7 @@ describe('App', () => {
     await screen.findByText(/firth \/\/ access/i)
     await userEvent.type(screen.getByLabelText(/email/i), 'a@b.co')
     await userEvent.type(screen.getByLabelText(/password/i), 'pw')
-    await userEvent.click(screen.getByRole('button', { name: /sign in/i }))
+    await userEvent.click(screen.getByTestId('auth-submit'))
     expect(await screen.findByText(/projects/i)).toBeInTheDocument()
   })
 

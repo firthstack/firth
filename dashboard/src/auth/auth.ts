@@ -39,14 +39,14 @@ export function createInsforgeAuth(baseUrl: string, anonKey: string): Auth {
 
     async signIn(email, password) {
       const { data, error } = await insforge.auth.signInWithPassword({ email, password })
-      if (error || !data) throw new Error(error ? 'sign-in failed' : 'sign-in failed')
+      if (error || !data?.accessToken) throw new Error(error?.message ?? 'sign-in failed')
       localStorage.setItem(TOKEN_KEY, data.accessToken)
       return { user: toUser(data.user), token: data.accessToken }
     },
 
     async signUp(email, password, name) {
       const { data, error } = await insforge.auth.signUp({ email, password, name })
-      if (error || !data) throw new Error('sign-up failed')
+      if (error || !data) throw new Error(error?.message ?? 'sign-up failed')
       const needsVerification = !!(data as any).requireEmailVerification || !(data as any).accessToken
       if (!needsVerification && (data as any).accessToken) {
         localStorage.setItem(TOKEN_KEY, (data as any).accessToken)

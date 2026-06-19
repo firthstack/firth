@@ -41,7 +41,7 @@ export function AuthScreen({ auth, onAuthed }: { auth: Auth; onAuthed: (token: s
   return (
     <Panel title="firth // access">
       <Row>
-        <TButton onClick={() => { setMode('signin'); setError(null); setNotice(null) }} disabled={mode === 'signin'}>[sign-in]</TButton>
+        <TButton onClick={() => { setMode('signin'); setError(null); setNotice(null) }} disabled={mode === 'signin'}>[sign in]</TButton>
         <TButton onClick={() => { setMode('signup'); setError(null); setNotice(null) }} disabled={mode === 'signup'}>[create account]</TButton>
       </Row>
       <form onSubmit={submit}>
@@ -54,7 +54,7 @@ export function AuthScreen({ auth, onAuthed }: { auth: Auth; onAuthed: (token: s
           <TInput id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
         </Row>
         <Row>
-          <TButton type="submit" disabled={busy}>{mode === 'signin' ? '[sign in]' : '[sign up]'}</TButton>
+          <TButton type="submit" data-testid="auth-submit" disabled={busy}>[submit]</TButton>
         </Row>
       </form>
       <Row>

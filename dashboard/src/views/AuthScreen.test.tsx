@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AuthScreen } from './AuthScreen'
 import type { Auth, AuthUser } from '../auth/auth'
@@ -24,7 +24,7 @@ describe('AuthScreen', () => {
     render(<AuthScreen auth={auth} onAuthed={onAuthed} />)
     await userEvent.type(screen.getByLabelText(/email/i), 'a@b.co')
     await userEvent.type(screen.getByLabelText(/password/i), 'pw')
-    await userEvent.click(screen.getByRole('button', { name: /sign in/i }))
+    await userEvent.click(screen.getByTestId('auth-submit'))
     expect(auth.signIn).toHaveBeenCalledWith('a@b.co', 'pw')
     expect(onAuthed).toHaveBeenCalledWith('tok-1', user)
   })
@@ -36,7 +36,7 @@ describe('AuthScreen', () => {
     await userEvent.click(screen.getByRole('button', { name: /create account/i }))
     await userEvent.type(screen.getByLabelText(/email/i), 'a@b.co')
     await userEvent.type(screen.getByLabelText(/password/i), 'pw')
-    await userEvent.click(screen.getByRole('button', { name: /sign up/i }))
+    await userEvent.click(screen.getByTestId('auth-submit'))
     expect(await screen.findByText(/check your email/i)).toBeInTheDocument()
     expect(onAuthed).not.toHaveBeenCalled()
   })
@@ -47,7 +47,7 @@ describe('AuthScreen', () => {
     render(<AuthScreen auth={auth} onAuthed={onAuthed} />)
     await userEvent.type(screen.getByLabelText(/email/i), 'a@b.co')
     await userEvent.type(screen.getByLabelText(/password/i), 'pw')
-    await userEvent.click(screen.getByRole('button', { name: /sign in/i }))
+    await userEvent.click(screen.getByTestId('auth-submit'))
     expect(await screen.findByText(/sign-in failed/i)).toBeInTheDocument()
     expect(onAuthed).not.toHaveBeenCalled()
   })
