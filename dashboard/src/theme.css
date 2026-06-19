@@ -67,3 +67,22 @@ body {
   padding: 0.75rem;
   margin: 0.5rem 0;
 }
+
+/* homepage / landing */
+.firth-home { max-width: 760px; margin: 0 auto; padding: 2rem 1rem; }
+.firth-home__banner { text-align: center; margin-bottom: 1.5rem; }
+.firth-home__ascii {
+  color: var(--green);
+  margin: 0;
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  font-size: 10px;
+  line-height: 1.1;
+}
+.firth-home__tagline { margin: 0.5rem 0 0; }
+.firth-home__block { margin-bottom: 1rem; }
+.firth-home__block p { margin: 0.25rem 0 0; }
+.firth-home__features { border-collapse: collapse; margin-top: 0.25rem; }
+.firth-home__features td { padding: 0.1rem 0.75rem 0.1rem 0; vertical-align: top; }
+.firth-home__feat-name { color: var(--fg); white-space: nowrap; }

@@ -16,7 +16,7 @@ export function Home({ onGetStarted }: { onGetStarted: () => void }) {
         <p className="firth-home__tagline firth-dim">// a builder platform for agents &amp; developers</p>
       </div>
 
-      <Panel title="about">
+      <Panel title="firth">
         <div className="firth-home__session">
           <div className="firth-home__block">
             <span className="firth-dim">$ firth --about</span>
