@@ -102,8 +102,10 @@ export class BranchesRepo {
   constructor(private db: DataClient) {}
 
   async findByName(owner: string, projectId: string, name: string): Promise<BranchRow | null> {
+    // Live branches only: a name can be reused after the old branch is archived, so a
+    // tombstone with the same name must not be resolved (e.g. as a createBranch parent).
     const { data, error } = await this.db.from('branches').select()
-      .eq('owner', owner).eq('project_id', projectId).eq('name', name)
+      .eq('owner', owner).eq('project_id', projectId).eq('name', name).is('archived_at', null)
     if (error) throw error
     return ((data ?? [])[0] as BranchRow) ?? null
   }

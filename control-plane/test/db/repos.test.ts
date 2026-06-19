@@ -150,6 +150,21 @@ describe('BranchesRepo archive/find/list', () => {
     expect(list.map((b) => b.id)).toEqual([main.id])
     expect(await repo.findById('uid-1', dev.id)).toBeNull()
   })
+
+  it('findByName ignores an archived branch and resolves the live one when a name is reused', async () => {
+    const db = fakeDb() as any
+    const repo = new BranchesRepo(db)
+    const main = await repo.create({ project_id: 'p1', owner: 'uid-1', name: 'main', parent_branch_id: null, is_default: true, status: 'active' })
+    const dev1 = await repo.create({ project_id: 'p1', owner: 'uid-1', name: 'dev', parent_branch_id: main.id, is_default: false, status: 'active' })
+    await repo.archive('uid-1', dev1.id)
+    // only an archived 'dev' exists → not found (so it can't be resolved as a parent)
+    expect(await repo.findByName('uid-1', 'p1', 'dev')).toBeNull()
+    // reuse the freed name with a new live branch → findByName resolves the LIVE row, not the tombstone
+    const dev2 = await repo.create({ project_id: 'p1', owner: 'uid-1', name: 'dev', parent_branch_id: main.id, is_default: false, status: 'active' })
+    const found = await repo.findByName('uid-1', 'p1', 'dev')
+    expect(found?.id).toBe(dev2.id)
+    expect(found?.status).toBe('active')
+  })
 })
 
 describe('ResourcesRepo listByProject/markStatus', () => {
