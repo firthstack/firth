@@ -97,7 +97,11 @@ test('POST /projects/:id/branches creates a branch via BranchService', async () 
     async provision() { return { kind: 'neon', providerRef: {} } }, async destroy() {},
     async createBranch() { return 'br-new' }, async deleteBranch() {},
     async mintCredentials() { return { DATABASE_URL: 'postgresql://c' } }, async readUsage() { return {} } }
-  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [neon as any] })
+  const fly = { kind: 'fly', branchModel: 'redeploy',
+    async provision(name: string) { return { kind: 'fly', providerRef: { flyApp: `a-${name}`, orgSlug: 'o' } } }, async destroy() {},
+    async createBranch() { return null }, async deleteBranch() {},
+    async mintCredentials() { return {} }, async readUsage() { return {} } }
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [neon as any, fly as any] })
   const r = await app.inject({ method: 'POST', url: '/projects/p1/branches', headers: { authorization: 'Bearer good' }, payload: { name: 'feat' } })
   expect(r.statusCode).toBe(201)
   expect(r.json().branch.name).toBe('feat')
