@@ -9,10 +9,12 @@ export function AuthScreen({ auth, onAuthed, onBack }: { auth: Auth; onAuthed: (
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [canResend, setCanResend] = useState(false)
+  const [resending, setResending] = useState(false)
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null); setNotice(null); setBusy(true)
+    setError(null); setNotice(null); setCanResend(false); setBusy(true)
     try {
       if (mode === 'signin') {
         const { user, token } = await auth.signIn(email, password)
@@ -21,14 +23,30 @@ export function AuthScreen({ auth, onAuthed, onBack }: { auth: Auth; onAuthed: (
         const res = await auth.signUp(email, password)
         if (res.needsVerification || !res.token || !res.user) {
           setNotice('check your email to verify, then sign in')
+          setCanResend(true)
         } else {
           onAuthed(res.token, res.user)
         }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'request failed')
+      // A sign-in can fail because the email isn't verified yet — offer to resend the link.
+      if (mode === 'signin') setCanResend(true)
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function resend() {
+    setError(null); setResending(true)
+    try {
+      await auth.resendVerification(email)
+      setNotice(`verification link sent to ${email} — check your inbox (and spam)`)
+      setCanResend(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'could not resend verification email')
+    } finally {
+      setResending(false)
     }
   }
 
@@ -69,6 +87,12 @@ export function AuthScreen({ auth, onAuthed, onBack }: { auth: Auth; onAuthed: (
       </Row>
       {notice && <p className="firth-dim">{notice}</p>}
       {error && <p className="firth-error">! {error}</p>}
+      {canResend && email && (
+        <Row>
+          <span className="firth-dim">email not verified?</span>
+          <TButton onClick={resend} disabled={resending} data-testid="resend-verification">[ resend verification link ]</TButton>
+        </Row>
+      )}
     </Panel>
   )
 }

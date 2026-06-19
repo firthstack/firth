@@ -13,6 +13,7 @@ function fakeAuth(overrides: Partial<Auth> = {}): Auth {
     signIn: vi.fn(async () => ({ user, token: 'tok-1' })),
     signUp: vi.fn(async () => ({ needsVerification: false, user, token: 'tok-1' })),
     signInWithOAuth: vi.fn(async () => {}),
+    resendVerification: vi.fn(async () => {}),
     signOut: vi.fn(async () => {}),
     ...overrides,
   }

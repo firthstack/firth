@@ -7,6 +7,7 @@ export interface Auth {
   signIn(email: string, password: string): Promise<{ user: AuthUser; token: string }>
   signUp(email: string, password: string, name?: string): Promise<{ needsVerification: boolean; user?: AuthUser; token?: string }>
   signInWithOAuth(provider: 'google' | 'github'): Promise<void>
+  resendVerification(email: string): Promise<void>
   signOut(): Promise<void>
 }
 
@@ -45,7 +46,7 @@ export function createInsforgeAuth(baseUrl: string, anonKey: string): Auth {
     },
 
     async signUp(email, password, name) {
-      const { data, error } = await insforge.auth.signUp({ email, password, name })
+      const { data, error } = await insforge.auth.signUp({ email, password, name, redirectTo: window.location.origin })
       if (error || !data) throw new Error(error?.message ?? 'sign-up failed')
       const needsVerification = !!(data as any).requireEmailVerification || !(data as any).accessToken
       if (!needsVerification && (data as any).accessToken) {
@@ -57,6 +58,11 @@ export function createInsforgeAuth(baseUrl: string, anonKey: string): Auth {
 
     async signInWithOAuth(provider) {
       await insforge.auth.signInWithOAuth(provider, { redirectTo: window.location.origin })
+    },
+
+    async resendVerification(email) {
+      const { error } = await insforge.auth.resendVerificationEmail({ email, redirectTo: window.location.origin })
+      if (error) throw new Error(error.message ?? 'could not resend verification email')
     },
 
     async signOut() {

@@ -12,6 +12,7 @@ function fakeAuth(overrides: Partial<Auth> = {}): Auth {
     signIn: vi.fn(async () => ({ user, token: 'tok-1' })),
     signUp: vi.fn(async () => ({ needsVerification: false, user, token: 'tok-1' })),
     signInWithOAuth: vi.fn(async () => {}),
+    resendVerification: vi.fn(async () => {}),
     signOut: vi.fn(async () => {}),
     ...overrides,
   }
@@ -50,6 +51,29 @@ describe('AuthScreen', () => {
     await userEvent.click(screen.getByTestId('auth-submit'))
     expect(await screen.findByText(/sign-in failed/i)).toBeInTheDocument()
     expect(onAuthed).not.toHaveBeenCalled()
+  })
+
+  it('a failed sign-in offers a resend-verification button that calls resendVerification', async () => {
+    const resendVerification = vi.fn(async () => {})
+    const auth = fakeAuth({ signIn: vi.fn(async () => { throw new Error('email not verified') }), resendVerification })
+    render(<AuthScreen auth={auth} onAuthed={vi.fn()} />)
+    await userEvent.type(screen.getByLabelText(/email/i), 'a@b.co')
+    await userEvent.type(screen.getByLabelText(/password/i), 'pw')
+    await userEvent.click(screen.getByTestId('auth-submit'))
+    const resendBtn = await screen.findByTestId('resend-verification')
+    await userEvent.click(resendBtn)
+    expect(resendVerification).toHaveBeenCalledWith('a@b.co')
+    expect(await screen.findByText(/verification link sent to a@b\.co/i)).toBeInTheDocument()
+  })
+
+  it('sign-up needing verification also offers the resend button', async () => {
+    const auth = fakeAuth({ signUp: vi.fn(async () => ({ needsVerification: true })) })
+    render(<AuthScreen auth={auth} onAuthed={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: /create account/i }))
+    await userEvent.type(screen.getByLabelText(/email/i), 'a@b.co')
+    await userEvent.type(screen.getByLabelText(/password/i), 'pw')
+    await userEvent.click(screen.getByTestId('auth-submit'))
+    expect(await screen.findByTestId('resend-verification')).toBeInTheDocument()
   })
 
   it('clicking the Google button calls signInWithOAuth("google")', async () => {
