@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify'
+import cors from '@fastify/cors'
 import type { FirthConfig } from './config.js'
 import { resolveUid, UnauthorizedError, NotFoundError, ConflictError } from './auth.js'
 import type { DataClient } from './db/types.js'
@@ -39,6 +40,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try { await new EventsRepo(db).record({ project_id: projectId, owner: uid, branch_id: branchId, source: 'resource', kind, payload }) }
     catch { /* swallow */ }
   }
+
+  app.register(cors, {
+    origin: deps.cfg.corsOrigins ?? ['http://localhost:5173'],
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type'],
+  })
 
   app.post('/projects', async (req, reply) => {
     const { uid, token, db } = await auth(req)

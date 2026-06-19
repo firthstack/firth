@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { expect, test } from 'vitest'
+import { expect, it, test } from 'vitest'
 import { buildServer } from '../src/server.js'
 import { encryptSecret, loadKeks } from '../src/crypto/secrets.js'
 
@@ -277,4 +277,11 @@ test('DELETE a missing project → 404', async () => {
   const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
   const res = await app.inject({ method: 'DELETE', url: '/projects/nope', headers: { authorization: 'Bearer good' } })
   expect(res.statusCode).toBe(404)
+})
+
+it('sends an Access-Control-Allow-Origin header for the Vite dev origin', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const res = await app.inject({ method: 'GET', url: '/projects', headers: { authorization: 'Bearer good', origin: 'http://localhost:5173' } })
+  expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173')
 })

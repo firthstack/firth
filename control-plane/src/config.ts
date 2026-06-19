@@ -9,6 +9,7 @@ export type FirthConfig = {
   flyOrgSlug?: string
   tigrisAccessKeyId?: string
   tigrisSecretAccessKey?: string
+  corsOrigins?: string[]
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
@@ -32,5 +33,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): FirthConfig {
     flyOrgSlug: env.FLY_ORG_SLUG,
     tigrisAccessKeyId: env.TIGRIS_ACCESS_KEY_ID,
     tigrisSecretAccessKey: env.TIGRIS_SECRET_ACCESS_KEY,
+    corsOrigins: env.FIRTH_CORS_ORIGINS ? env.FIRTH_CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
   }
 }

@@ -16,6 +16,7 @@
     "live:deploy": "tsx scripts/live-deploy-check.ts"
   },
   "dependencies": {
+    "@fastify/cors": "^9.0.1",
     "@insforge/sdk": "latest",
     "aws4fetch": "^1.0.20",
     "fastify": "^4.28.0"
