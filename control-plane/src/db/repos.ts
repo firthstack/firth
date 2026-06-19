@@ -90,6 +90,9 @@ export class EventsRepo {
 
   async record(row: NewEventRow): Promise<{ inserted: boolean }> {
     if (row.dedup_key) {
+      // ignoreDuplicates → ON CONFLICT DO NOTHING, so this needs only the
+      // events table's existing INSERT grant (no UPDATE). The SDK's .upsert is
+      // verified against the live backend, not the compiler (DataClient is a cast).
       const { data, error } = await this.db.from('events')
         .upsert(row, { onConflict: 'owner,project_id,dedup_key', ignoreDuplicates: true })
         .select()
