@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { events } from '../../src/cli/commands/events.js'
-import { writeProjectLink } from '../../src/cli/config.js'
+import { events } from '../src/commands/events.js'
+import { writeProjectLink } from '../src/config.js'
 
 test('events prints the timeline for the linked project', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)

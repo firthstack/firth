@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { route } from '../../src/cli/index.js'
+import { route } from '../src/index.js'
 
 function deps(over = {}) {
   const out: string[] = []

@@ -2,8 +2,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { secrets } from '../../src/cli/commands/secrets.js'
-import { writeProjectLink } from '../../src/cli/config.js'
+import { secrets } from '../src/commands/secrets.js'
+import { writeProjectLink } from '../src/config.js'
 
 test('secrets merges project + branch scoped secrets into .env, never printing values', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)

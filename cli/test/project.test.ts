@@ -2,9 +2,9 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { projectCreate, projectList } from '../../src/cli/commands/project.js'
-import { readProjectLink } from '../../src/cli/config.js'
-import { FirthApi } from '../../src/cli/api.js'
+import { projectCreate, projectList } from '../src/commands/project.js'
+import { readProjectLink } from '../src/config.js'
+import { FirthApi } from '../src/api.js'
 
 function depsWith(api: FirthApi, dir: string) {
   const out: string[] = []

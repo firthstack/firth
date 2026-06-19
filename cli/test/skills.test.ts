@@ -2,7 +2,7 @@ import { mkdtempSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { skillsPull } from '../../src/cli/commands/skills.js'
+import { skillsPull } from '../src/commands/skills.js'
 
 test('skills pull installs the firth SKILL.md into ./.claude/skills/firth', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'firth-'))

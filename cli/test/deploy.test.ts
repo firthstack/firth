@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { deploy } from '../../src/cli/commands/deploy.js'
-import { writeProjectLink } from '../../src/cli/config.js'
+import { deploy } from '../src/commands/deploy.js'
+import { writeProjectLink } from '../src/config.js'
 
 function deps(dir: string, api: any) {
   const out: string[] = []

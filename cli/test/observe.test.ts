@@ -2,8 +2,8 @@ import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { observeSync } from '../../src/cli/commands/observe.js'
-import { writeProjectLink } from '../../src/cli/config.js'
+import { observeSync } from '../src/commands/observe.js'
+import { writeProjectLink } from '../src/config.js'
 
 test('observe sync uploads redacted audit lines as agent events', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { readConfig, writeConfig, readProjectLink, writeProjectLink } from '../../src/cli/config.js'
+import { readConfig, writeConfig, readProjectLink, writeProjectLink } from '../src/config.js'
 
 test('apiUrl precedence: env > file > default', () => {
   const home = mkdtempSync(join(tmpdir(), 'firth-'))

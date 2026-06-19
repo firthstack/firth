@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { FirthApi } from '../../src/cli/api.js'
+import { FirthApi } from '../src/api.js'
 
 function fetcher(routes: Array<{ match: (u: string, i: any) => boolean; status?: number; body?: any }>) {
   const calls: any[] = []

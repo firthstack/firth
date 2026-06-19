@@ -1,0 +1,14 @@
+{
+  "name": "firth-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "firth": "dist/index.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('../skills','dist/skills',{recursive:true})\"",
+    "test": "vitest run",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": { "@insforge/sdk": "latest" },
+  "devDependencies": { "@types/node": "^20.14.0", "tsx": "^4.16.0", "typescript": "^5.5.0", "vitest": "^2.0.0" }
+}

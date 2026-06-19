@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { login, logout } from '../../src/cli/commands/auth.js'
-import { readConfig } from '../../src/cli/config.js'
+import { login, logout } from '../src/commands/auth.js'
+import { readConfig } from '../src/config.js'
 
 function deps(home: string, over = {}) {
   const out: string[] = []

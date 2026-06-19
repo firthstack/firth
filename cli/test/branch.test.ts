@@ -2,8 +2,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
-import { branchCreate, branchList } from '../../src/cli/commands/branch.js'
-import { writeProjectLink } from '../../src/cli/config.js'
+import { branchCreate, branchList } from '../src/commands/branch.js'
+import { writeProjectLink } from '../src/config.js'
 
 function deps(dir: string, api: any) {
   const out: string[] = []
