@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AuthScreen } from './AuthScreen'
 import type { Auth, AuthUser } from '../auth/auth'
@@ -11,7 +11,6 @@ function fakeAuth(overrides: Partial<Auth> = {}): Auth {
     restore: vi.fn(async () => null),
     signIn: vi.fn(async () => ({ user, token: 'tok-1' })),
     signUp: vi.fn(async () => ({ needsVerification: false, user, token: 'tok-1' })),
-    signInWithOAuth: vi.fn(async () => {}),
     resendVerification: vi.fn(async () => {}),
     signOut: vi.fn(async () => {}),
     ...overrides,
@@ -74,12 +73,5 @@ describe('AuthScreen', () => {
     await userEvent.type(screen.getByLabelText(/password/i), 'pw')
     await userEvent.click(screen.getByTestId('auth-submit'))
     expect(await screen.findByTestId('resend-verification')).toBeInTheDocument()
-  })
-
-  it('clicking the Google button calls signInWithOAuth("google")', async () => {
-    const auth = fakeAuth()
-    render(<AuthScreen auth={auth} onAuthed={vi.fn()} />)
-    await userEvent.click(screen.getByRole('button', { name: /google/i }))
-    expect(auth.signInWithOAuth).toHaveBeenCalledWith('google')
   })
 })

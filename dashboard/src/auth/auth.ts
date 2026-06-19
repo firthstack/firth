@@ -1,72 +1,68 @@
-import { createClient } from '@insforge/sdk'
-
 export type AuthUser = { id: string; email: string }
 
 export interface Auth {
   restore(): Promise<{ user: AuthUser; token: string } | null>
   signIn(email: string, password: string): Promise<{ user: AuthUser; token: string }>
   signUp(email: string, password: string, name?: string): Promise<{ needsVerification: boolean; user?: AuthUser; token?: string }>
-  signInWithOAuth(provider: 'google' | 'github'): Promise<void>
   resendVerification(email: string): Promise<void>
   signOut(): Promise<void>
 }
 
 const TOKEN_KEY = 'firth_token'
 
-function toUser(u: any): AuthUser {
-  return { id: u?.id ?? '', email: u?.email ?? '' }
-}
-
-export function createInsforgeAuth(baseUrl: string, anonKey: string): Auth {
-  const insforge = createClient({ baseUrl, anonKey })
-
-  function readToken(): string | null {
-    // Defensive: SDK token accessor path may vary across versions; fall back to localStorage.
-    // Note: tokenManager is private on both InsForgeClient and Auth class in the installed SDK;
-    // accessing via (insforge as any).auth?.tokenManager?.getAccessToken?.() reaches Auth's private field.
-    const fromSdk = (insforge as any).auth?.tokenManager?.getAccessToken?.()
-    return fromSdk ?? localStorage.getItem(TOKEN_KEY)
+export function createControlPlaneAuth(apiUrl: string, fetcher: typeof fetch = (...a) => fetch(...a)): Auth {
+  async function call(path: string, init: RequestInit) {
+    const res = await fetcher(`${apiUrl}${path}`, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error((body as any)?.error || `request failed: ${res.status}`)
+    return body as any
   }
 
   return {
     async restore() {
-      const { data } = await insforge.auth.getCurrentUser()
-      const user = data?.user
-      if (!user) return null
-      const token = readToken()
+      const token = localStorage.getItem(TOKEN_KEY)
       if (!token) return null
-      return { user: toUser(user), token }
+      try {
+        const { user } = await call('/auth/me', { method: 'GET', headers: { Authorization: `Bearer ${token}` } })
+        return user ? { user, token } : null
+      } catch {
+        localStorage.removeItem(TOKEN_KEY)
+        return null
+      }
     },
 
     async signIn(email, password) {
-      const { data, error } = await insforge.auth.signInWithPassword({ email, password })
-      if (error || !data?.accessToken) throw new Error(error?.message ?? 'sign-in failed')
-      localStorage.setItem(TOKEN_KEY, data.accessToken)
-      return { user: toUser(data.user), token: data.accessToken }
+      const { token, user } = await call('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      })
+      localStorage.setItem(TOKEN_KEY, token)
+      return { user, token }
     },
 
     async signUp(email, password, name) {
-      const { data, error } = await insforge.auth.signUp({ email, password, name, redirectTo: window.location.origin })
-      if (error || !data) throw new Error(error?.message ?? 'sign-up failed')
-      const needsVerification = !!(data as any).requireEmailVerification || !(data as any).accessToken
-      if (!needsVerification && (data as any).accessToken) {
-        localStorage.setItem(TOKEN_KEY, (data as any).accessToken)
-        return { needsVerification: false, user: toUser((data as any).user), token: (data as any).accessToken }
+      const data = await call('/auth/signup', {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name, redirectTo: window.location.origin }),
+      })
+      if (!data.needsVerification && data.token && data.user) {
+        localStorage.setItem(TOKEN_KEY, data.token)
+        return { needsVerification: false, user: data.user, token: data.token }
       }
       return { needsVerification: true }
     },
 
-    async signInWithOAuth(provider) {
-      await insforge.auth.signInWithOAuth(provider, { redirectTo: window.location.origin })
-    },
-
     async resendVerification(email) {
-      const { error } = await insforge.auth.resendVerificationEmail({ email, redirectTo: window.location.origin })
-      if (error) throw new Error(error.message ?? 'could not resend verification email')
+      await call('/auth/resend-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email, redirectTo: window.location.origin }),
+      })
     },
 
     async signOut() {
-      await insforge.auth.signOut()
       localStorage.removeItem(TOKEN_KEY)
     },
   }

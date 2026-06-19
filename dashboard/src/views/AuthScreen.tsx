@@ -50,12 +50,6 @@ export function AuthScreen({ auth, onAuthed, onBack }: { auth: Auth; onAuthed: (
     }
   }
 
-  async function oauth(provider: 'google' | 'github') {
-    setError(null)
-    try { await auth.signInWithOAuth(provider) }
-    catch (err) { setError(err instanceof Error ? err.message : 'oauth failed') }
-  }
-
   return (
     <Panel title="firth // access">
       {onBack && (
@@ -80,11 +74,6 @@ export function AuthScreen({ auth, onAuthed, onBack }: { auth: Auth; onAuthed: (
           <TButton type="submit" data-testid="auth-submit" disabled={busy}>[submit]</TButton>
         </Row>
       </form>
-      <Row>
-        <span className="firth-dim">oauth:</span>
-        <TButton onClick={() => oauth('google')}>[google]</TButton>
-        <TButton onClick={() => oauth('github')}>[github]</TButton>
-      </Row>
       {notice && <p className="firth-dim">{notice}</p>}
       {error && <p className="firth-error">! {error}</p>}
       {canResend && email && (
