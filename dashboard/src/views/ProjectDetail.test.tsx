@@ -80,6 +80,13 @@ describe('ProjectDetail', () => {
     expect(activeEls.length).toBeGreaterThan(0)
   })
 
+  it('compute card shows the reachable host url as a clickable link', async () => {
+    render(<ProjectDetail api={fakeApi()} projectId="p1" onBack={vi.fn()} />)
+    const link = await screen.findByRole('link', { name: 'https://firth-first-cd34.fly.dev' })
+    expect(link).toHaveAttribute('href', 'https://firth-first-cd34.fly.dev')
+    expect(link).toHaveAttribute('target', '_blank')
+  })
+
   // ---- cli hints -----------------------------------------------------------
 
   it('shows the firth project link cli hint with the project id', async () => {

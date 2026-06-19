@@ -50,6 +50,34 @@ function SecretRow({
 }
 
 // ---------------------------------------------------------------------------
+// LinkRow — labeled clickable URL (opens in a new tab) with a [copy] button
+// ---------------------------------------------------------------------------
+function LinkRow({ label, href }: { label: string; href: string }) {
+  return (
+    <Row>
+      <span className="firth-dim" style={{ minWidth: '14ch', flexShrink: 0 }}>
+        {label}
+      </span>
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            style={{ whiteSpace: 'pre', fontFamily: 'inherit', color: 'inherit' }}
+          >
+            {href}
+          </a>
+        </div>
+      </div>
+      <TButton onClick={() => copyText(href)} style={{ flexShrink: 0 }}>
+        [copy]
+      </TButton>
+    </Row>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Postgres card
 // ---------------------------------------------------------------------------
 function PostgresCard({
@@ -162,6 +190,7 @@ function ComputeCard({ resources, branches }: { resources: Resource[]; branches:
                 <span className="firth-dim">{resource.status}</span>
               </Row>
               {flyApp && <SecretRow label="app" value={flyApp} />}
+              {flyApp && <LinkRow label="url" href={`https://${flyApp}.fly.dev`} />}
               {orgSlug && <SecretRow label="org" value={orgSlug} />}
               <SecretRow label="spec" value="shared-cpu-1x · 1 vCPU · 256 MB" />
             </div>
