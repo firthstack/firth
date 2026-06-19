@@ -3,6 +3,7 @@ import { readConfig, writeProjectLink, readProjectLink, clearProjectLink } from 
 import { FirthApi } from '../api.js'
 import type { CliDeps } from '../index.js'
 import { formatTeardown } from './util.js'
+import { ensureFlyctl } from '../fly.js'
 
 // Build a FirthApi from stored config; tests can override via deps.makeApi.
 export function apiFromDeps(deps: CliDeps & { makeApi?: () => FirthApi }): FirthApi {
@@ -13,6 +14,7 @@ export function apiFromDeps(deps: CliDeps & { makeApi?: () => FirthApi }): Firth
 }
 
 export async function projectCreate(argv: string[], deps: CliDeps & { makeApi?: () => FirthApi }): Promise<number> {
+  await ensureFlyctl(deps)
   const name = argv[0]
   if (!name) { deps.print('usage: firth project create <name>'); return 1 }
   const out = await apiFromDeps(deps).createProject(name)
@@ -22,6 +24,7 @@ export async function projectCreate(argv: string[], deps: CliDeps & { makeApi?: 
 }
 
 export async function projectLink(argv: string[], deps: CliDeps): Promise<number> {
+  await ensureFlyctl(deps)
   const id = argv[0]
   if (!id) { deps.print('usage: firth project link <id>'); return 1 }
   writeProjectLink(id, deps.cwd)

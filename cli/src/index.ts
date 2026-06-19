@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import { login, logout } from './commands/auth.js'
 import { projectCreate, projectLink, projectList, projectDelete } from './commands/project.js'
@@ -9,12 +12,21 @@ import { deploy } from './commands/deploy.js'
 import { events } from './commands/events.js'
 import { observeSync } from './commands/observe.js'
 import { status } from './commands/status.js'
+import { defaultRunner, type Runner } from './fly.js'
 
 export type CliDeps = {
   print: (s: string) => void
   home: string
   cwd: string
   env: NodeJS.ProcessEnv
+  run?: Runner
+}
+
+function readVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url))
+    return JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8')).version ?? '0.0.0'
+  } catch { return '0.0.0' }
 }
 
 const USAGE = `firth <command>
@@ -36,7 +48,8 @@ Commands:
   project delete            Delete the linked project + all resources (--yes)
   branch switch <name>      Set the current branch (secrets/events default to it)
   branch delete <name>      Delete a branch + its Neon branch (--yes)
-  --help                    Show this help`
+  --help                    Show this help
+  --version, -v             Print the CLI version`
 
 // Command handlers registered by later tasks. Each: (argv, deps) => Promise<number>.
 export const COMMANDS: Record<string, (argv: string[], deps: CliDeps) => Promise<number>> = {}
@@ -63,6 +76,10 @@ export async function route(argv: string[], deps: CliDeps): Promise<number> {
     deps.print(USAGE)
     return 0
   }
+  if (argv[0] === '--version' || argv[0] === '-v') {
+    deps.print(readVersion())
+    return 0
+  }
   // Support two-word commands ("project create") and one-word ("login").
   const key2 = argv.length >= 2 ? `${argv[0]} ${argv[1]}` : ''
   const handler = COMMANDS[key2] ?? COMMANDS[argv[0]]
@@ -82,6 +99,7 @@ export async function route(argv: string[], deps: CliDeps): Promise<number> {
 export async function main(): Promise<void> {
   const code = await route(process.argv.slice(2), {
     print: (s) => console.log(s), home: homedir(), cwd: process.cwd(), env: process.env,
+    run: defaultRunner,
   })
   process.exit(code)
 }

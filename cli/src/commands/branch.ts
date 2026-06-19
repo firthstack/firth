@@ -4,6 +4,7 @@ import { apiFromDeps } from './project.js'
 import { formatTeardown } from './util.js'
 import type { CliDeps } from '../index.js'
 import type { FirthApi } from '../api.js'
+import { ensureFlyctl } from '../fly.js'
 
 function linkedProject(deps: CliDeps): string {
   const link = readProjectLink(deps.cwd)
@@ -12,6 +13,7 @@ function linkedProject(deps: CliDeps): string {
 }
 
 export async function branchCreate(argv: string[], deps: CliDeps & { makeApi?: () => FirthApi }): Promise<number> {
+  await ensureFlyctl(deps)
   try {
     const { values, positionals } = parseArgs({ args: argv, options: { from: { type: 'string' } }, allowPositionals: true })
     const name = positionals[0]
@@ -39,6 +41,7 @@ export async function branchList(_argv: string[], deps: CliDeps & { makeApi?: ()
 }
 
 export async function branchSwitch(argv: string[], deps: CliDeps & { makeApi?: () => FirthApi }): Promise<number> {
+  await ensureFlyctl(deps)
   try {
     const { positionals } = parseArgs({ args: argv, options: {}, allowPositionals: true })
     const name = positionals[0]
