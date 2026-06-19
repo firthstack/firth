@@ -32,6 +32,14 @@ describe('Api', () => {
     await expect(api.getProject('nope')).rejects.toBeInstanceOf(ApiError)
   })
 
+  it('default fetcher wraps global fetch (not the bare reference) to avoid Illegal invocation', () => {
+    // A bare `private fetcher = fetch` would make this `toBe(fetch)` and throw
+    // "Illegal invocation" in the browser when called as `this.fetcher(...)`.
+    const api = new Api('http://api', () => null) as any
+    expect(typeof api.fetcher).toBe('function')
+    expect(api.fetcher).not.toBe(fetch)
+  })
+
   it('deleteProject hits the DELETE path', async () => {
     const fetcher = vi.fn(async () => jsonRes(200, { teardown: { destroyed: [], failed: [] } }))
     const api = new Api('http://api', () => 'tok-1', fetcher as any)

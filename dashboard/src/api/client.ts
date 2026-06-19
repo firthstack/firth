@@ -13,7 +13,10 @@ export class Api {
   constructor(
     private baseUrl: string,
     private getToken: () => string | null,
-    private fetcher: Fetcher = fetch,
+    // Wrap global fetch so it's always invoked with the correct receiver. A bare
+    // `= fetch` stored on `this.fetcher` and called as `this.fetcher(...)` runs fetch
+    // with `this` = the Api instance, which browsers reject ("Illegal invocation").
+    private fetcher: Fetcher = (...args: Parameters<typeof fetch>) => fetch(...args),
   ) {}
 
   private async req(method: string, path: string, body?: unknown): Promise<any> {
