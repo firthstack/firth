@@ -32,6 +32,16 @@ describe('secret encryption', () => {
     expect(() => decryptSecret(bad, keks)).toThrow()
   })
 
+  test('uppercase env-var keys resolve to the lowercase version label (host env-key compat)', () => {
+    const key = randomBytes(32).toString('base64')
+    const { keks, current } = loadKeks({ FIRTH_KEK_CURRENT: 'V1', FIRTH_KEK_V1: key })
+    expect(current).toBe('v1') // normalized, so it matches existing kek_version='v1' secrets
+    expect(keks.has('v1')).toBe(true)
+    const enc = encryptSecret('z', keks, current)
+    expect(enc.kekVersion).toBe('v1') // stable label regardless of env-key case
+    expect(decryptSecret(enc, keks)).toBe('z')
+  })
+
   test('unknown KEK version throws without leaking plaintext', () => {
     const { keks } = loadKeks(env)
     expect(() => decryptSecret({ ciphertext: 'a', nonce: 'b', kekVersion: 'v9' }, keks))

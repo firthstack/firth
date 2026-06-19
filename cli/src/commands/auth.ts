@@ -11,7 +11,7 @@ export async function login(argv: string[], deps: CliDeps & { makeApi?: () => Pi
   const cfg = readConfig(deps.home, deps.env)
   // --api-url sets the control-plane host for this login and persists it for later commands
   // (a token is host-specific, so switching hosts means logging in there). Falls back to the
-  // existing config / FIRTH_API_URL env / default (http://localhost:8080).
+  // existing config / FIRTH_API_URL env / the built-in default (the deployed control plane).
   const apiUrl = values['api-url'] ?? cfg.apiUrl
   const api = deps.makeApi ? deps.makeApi() : new FirthApi(apiUrl, '')
   try {

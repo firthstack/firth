@@ -6,7 +6,7 @@ import { readConfig, writeConfig, readProjectLink, writeProjectLink, setCurrentB
 
 test('apiUrl precedence: env > file > default', () => {
   const home = mkdtempSync(join(tmpdir(), 'firth-'))
-  expect(readConfig(home, {}).apiUrl).toBe('http://localhost:8080')
+  expect(readConfig(home, {}).apiUrl).toBe('https://firth-control-plane-0662c2ef-202a-4feb-8267-5501b3b60037.fly.dev')
   writeConfig({ apiUrl: 'https://cp.example' }, home)
   expect(readConfig(home, {}).apiUrl).toBe('https://cp.example')
   expect(readConfig(home, { FIRTH_API_URL: 'https://env.example' }).apiUrl).toBe('https://env.example')

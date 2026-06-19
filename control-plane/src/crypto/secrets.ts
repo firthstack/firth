@@ -3,12 +3,16 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 export type EncryptedSecret = { ciphertext: string; nonce: string; kekVersion: string }
 
 export function loadKeks(env: NodeJS.ProcessEnv): { keks: Map<string, Buffer>; current: string } {
-  const current = env.FIRTH_KEK_CURRENT
-  if (!current) throw new Error('FIRTH_KEK_CURRENT is not set')
+  const rawCurrent = env.FIRTH_KEK_CURRENT
+  if (!rawCurrent) throw new Error('FIRTH_KEK_CURRENT is not set')
+  // Version labels are normalized to lowercase so the env-var KEY can be UPPERCASE
+  // (some hosts — e.g. InsForge compute — reject lowercase env keys) while the stored
+  // `kek_version` label stays stable. `FIRTH_KEK_V1` and `FIRTH_KEK_v1` both resolve to "v1".
+  const current = rawCurrent.toLowerCase()
   const keks = new Map<string, Buffer>()
   for (const [k, v] of Object.entries(env)) {
     if (!k.startsWith('FIRTH_KEK_') || k === 'FIRTH_KEK_CURRENT' || !v) continue
-    const version = k.slice('FIRTH_KEK_'.length)
+    const version = k.slice('FIRTH_KEK_'.length).toLowerCase()
     const buf = Buffer.from(v, 'base64')
     if (buf.length !== 32) throw new Error(`KEK ${version} must be 32 bytes (base64)`)
     keks.set(version, buf)

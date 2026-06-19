@@ -4,7 +4,9 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 
 export type CliConfig = { apiUrl: string; token?: string }
 
-const DEFAULT_API = 'http://localhost:8080'
+// Production control plane (InsForge compute). Override with `firth login --api-url`
+// or FIRTH_API_URL=… for local dev against http://localhost:8080.
+const DEFAULT_API = 'https://firth-control-plane-0662c2ef-202a-4feb-8267-5501b3b60037.fly.dev'
 const gpath = (home: string) => join(home, '.firth', 'config.json')
 const lpath = (cwd: string) => join(cwd, '.firth', 'project.json')
 
