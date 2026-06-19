@@ -244,6 +244,21 @@ test('GET /projects/:id drops credential-shaped provider_ref keys (whitelist)', 
   expect(ref.connectionUri).toBeUndefined()
 })
 
+test('GET /projects/:id surfaces fly provider_ref flyApp + orgSlug (not stripped)', async () => {
+  const db = fakeData()
+  const project = (await db.from('projects').insert({ owner: 'uid-1', name: 'fly-proj', status: 'active' }).then((r: any) => r)).data[0]
+  await db.from('resources').insert({
+    owner: 'uid-1', project_id: project.id, kind: 'fly',
+    provider_ref: { flyApp: 'firth-x-ab12', orgSlug: 'my-org' }, status: 'active',
+  })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
+  const res = await app.inject({ method: 'GET', url: `/projects/${project.id}`, headers: { authorization: 'Bearer good' } })
+  expect(res.statusCode).toBe(200)
+  const ref = res.json().resources[0].provider_ref
+  expect(ref.flyApp).toBe('firth-x-ab12')
+  expect(ref.orgSlug).toBe('my-org')
+})
+
 test('GET /projects/:id for an unknown project → 404', async () => {
   const db = fakeData()
   const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })

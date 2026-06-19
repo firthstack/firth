@@ -64,4 +64,9 @@ export class Api {
   deleteBranch(projectId: string, branchId: string) {
     return this.req('DELETE', `/projects/${projectId}/branches/${branchId}`)
   }
+
+  getSecrets(projectId: string, branch?: string): Promise<Record<string, string>> {
+    const q = branch ? `?branch=${encodeURIComponent(branch)}` : ''
+    return this.req('GET', `/projects/${projectId}/secrets${q}`).then((r) => r.secrets)
+  }
 }

@@ -1,7 +1,7 @@
 const WHITELIST: Record<string, string[]> = {
   neon: ['neonProjectId', 'defaultBranchId', 'dbName', 'roleName', 'host', 'database', 'region'],
   s3: ['bucket', 'bucketName', 'endpoint', 'region'],
-  fly: ['app', 'appName', 'machineId', 'region'],
+  fly: ['flyApp', 'orgSlug', 'app', 'appName', 'machineId', 'region'],
 }
 
 export function publicResourceView(r: { kind: string; status: string; provider_ref: Record<string, unknown> }) {

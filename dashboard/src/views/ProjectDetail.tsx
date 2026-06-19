@@ -1,10 +1,179 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Panel, Row, TButton, TInput, Confirm } from '../ui/Terminal'
 import type { Api } from '../api/client'
-import type { ProjectDetail as Detail } from '../types'
+import type { ProjectDetail as Detail, Resource } from '../types'
 
+// ---------------------------------------------------------------------------
+// Helper: copy text to clipboard (guarded for missing API)
+// ---------------------------------------------------------------------------
+function copyText(value: string) {
+  navigator.clipboard?.writeText(value)
+}
+
+// ---------------------------------------------------------------------------
+// Helper: copy a set of KEY=value pairs to clipboard
+// ---------------------------------------------------------------------------
+function copyDotEnv(pairs: Array<[string, string]>) {
+  const text = pairs.map(([k, v]) => `${k}=${v}`).join('\n')
+  navigator.clipboard?.writeText(text)
+}
+
+// ---------------------------------------------------------------------------
+// SecretRow — labeled monospace line with optional [copy] button
+// ---------------------------------------------------------------------------
+function SecretRow({
+  label,
+  value,
+  copyable = false,
+}: {
+  label: string
+  value: string
+  copyable?: boolean
+}) {
+  return (
+    <Row>
+      <span className="firth-dim" style={{ minWidth: '14ch', flexShrink: 0 }}>
+        {label}
+      </span>
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <code style={{ whiteSpace: 'pre', fontFamily: 'inherit' }}>{value}</code>
+        </div>
+      </div>
+      {copyable && (
+        <TButton onClick={() => copyText(value)} style={{ flexShrink: 0 }}>
+          [copy]
+        </TButton>
+      )}
+    </Row>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Postgres card
+// ---------------------------------------------------------------------------
+function PostgresCard({
+  resource,
+  databaseUrl,
+}: {
+  resource: Resource | undefined
+  databaseUrl: string | undefined
+}) {
+  const ref = resource?.provider_ref ?? {}
+  const neonProjectId = String(ref.neonProjectId ?? '')
+  const dbName = String(ref.dbName ?? '')
+  const roleName = String(ref.roleName ?? '')
+  const neonBranchRef = String(ref.neonBranchRef ?? '')
+
+  const envPairs: Array<[string, string]> = databaseUrl ? [['DATABASE_URL', databaseUrl]] : []
+
+  return (
+    <Panel title="postgres">
+      {!resource ? (
+        <p className="firth-dim">not provisioned</p>
+      ) : (
+        <>
+          <Row>
+            <TButton onClick={() => copyDotEnv(envPairs)}>[copy .env]</TButton>
+            <span className="firth-dim">{resource.status}</span>
+          </Row>
+          {databaseUrl ? (
+            <SecretRow label="DATABASE_URL" value={databaseUrl} copyable />
+          ) : (
+            <p className="firth-dim">DATABASE_URL not available</p>
+          )}
+          {dbName && <SecretRow label="dbName" value={dbName} />}
+          {roleName && <SecretRow label="roleName" value={roleName} />}
+          {neonProjectId && <SecretRow label="neonProjectId" value={neonProjectId} />}
+          {neonBranchRef && <SecretRow label="neon_branch_ref" value={neonBranchRef} />}
+        </>
+      )}
+    </Panel>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Storage card
+// ---------------------------------------------------------------------------
+function StorageCard({
+  resource,
+  projectSecrets,
+}: {
+  resource: Resource | undefined
+  projectSecrets: Record<string, string>
+}) {
+  const ref = resource?.provider_ref ?? {}
+  const bucket =
+    projectSecrets['BUCKET_NAME'] ?? String(ref.bucket ?? ref.bucketName ?? '')
+  const endpoint =
+    projectSecrets['AWS_ENDPOINT_URL_S3'] ?? String(ref.endpoint ?? '')
+  const region = projectSecrets['AWS_REGION'] ?? String(ref.region ?? '')
+  const accessKeyId = projectSecrets['AWS_ACCESS_KEY_ID'] ?? ''
+  const secretKey = projectSecrets['AWS_SECRET_ACCESS_KEY'] ?? ''
+
+  const envPairs: Array<[string, string]> = [
+    ...(bucket ? ([['BUCKET_NAME', bucket]] as Array<[string, string]>) : []),
+    ...(endpoint ? ([['AWS_ENDPOINT_URL_S3', endpoint]] as Array<[string, string]>) : []),
+    ...(region ? ([['AWS_REGION', region]] as Array<[string, string]>) : []),
+    ...(accessKeyId ? ([['AWS_ACCESS_KEY_ID', accessKeyId]] as Array<[string, string]>) : []),
+    ...(secretKey ? ([['AWS_SECRET_ACCESS_KEY', secretKey]] as Array<[string, string]>) : []),
+  ]
+
+  return (
+    <Panel title="storage">
+      {!resource ? (
+        <p className="firth-dim">not provisioned</p>
+      ) : (
+        <>
+          <Row>
+            <TButton onClick={() => copyDotEnv(envPairs)}>[copy .env]</TButton>
+            <span className="firth-dim">{resource.status}</span>
+          </Row>
+          {bucket && <SecretRow label="BUCKET_NAME" value={bucket} />}
+          {endpoint && <SecretRow label="AWS_ENDPOINT_URL_S3" value={endpoint} />}
+          {region && <SecretRow label="AWS_REGION" value={region} />}
+          {accessKeyId && <SecretRow label="AWS_ACCESS_KEY_ID" value={accessKeyId} copyable />}
+          {secretKey && <SecretRow label="AWS_SECRET_ACCESS_KEY" value={secretKey} copyable />}
+        </>
+      )}
+    </Panel>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Compute card
+// ---------------------------------------------------------------------------
+function ComputeCard({ resource }: { resource: Resource | undefined }) {
+  const ref = resource?.provider_ref ?? {}
+  const flyApp = String(ref.flyApp ?? '')
+  const orgSlug = String(ref.orgSlug ?? '')
+
+  return (
+    <Panel title="compute">
+      {!resource ? (
+        <p className="firth-dim">not provisioned</p>
+      ) : (
+        <>
+          <Row>
+            <span className="firth-dim">{resource.status}</span>
+          </Row>
+          {flyApp && <SecretRow label="app" value={flyApp} />}
+          {orgSlug && <SecretRow label="org" value={orgSlug} />}
+          <SecretRow label="spec" value="shared-cpu-1x · 1 vCPU · 256 MB" />
+          <p className="firth-dim">deploy with `firth deploy` to create a machine</p>
+        </>
+      )}
+    </Panel>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId: string; onBack: () => void }) {
   const [detail, setDetail] = useState<Detail | null>(null)
+  const [projectSecrets, setProjectSecrets] = useState<Record<string, string>>({})
+  const [branchSecrets, setBranchSecrets] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -14,9 +183,32 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null)
-    try { setDetail(await api.getProject(projectId)) }
-    catch (err) { setError(err instanceof Error ? err.message : 'failed to load project') }
-    finally { setLoading(false) }
+    try {
+      const d = await api.getProject(projectId)
+      setDetail(d)
+
+      // Fetch secrets; allow partial failure so resources still render
+      try {
+        const ps = await api.getSecrets(projectId)
+        setProjectSecrets(ps)
+      } catch {
+        setError('failed to load project secrets')
+      }
+
+      const def = d.branches.find((b) => b.is_default) ?? d.branches[0]
+      if (def) {
+        try {
+          const bs = await api.getSecrets(projectId, def.id)
+          setBranchSecrets(bs)
+        } catch {
+          // branch secrets failure is non-fatal; DATABASE_URL just won't show
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'failed to load project')
+    } finally {
+      setLoading(false)
+    }
   }, [api, projectId])
 
   useEffect(() => { void refresh() }, [refresh])
@@ -34,6 +226,10 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
     catch (err) { setError(err instanceof Error ? err.message : 'failed to delete branch') }
   }
 
+  const neonResource = detail?.resources.find((r) => r.kind === 'neon')
+  const s3Resource = detail?.resources.find((r) => r.kind === 's3')
+  const flyResource = detail?.resources.find((r) => r.kind === 'fly')
+
   return (
     <div>
       <Row>
@@ -45,16 +241,9 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
       {error && <p className="firth-error">! {error}</p>}
       {detail && (
         <>
-          <Panel title="resources">
-            {detail.resources.length === 0 && <p className="firth-dim">no resources</p>}
-            {detail.resources.map((r, i) => (
-              <Row key={`${r.kind}-${i}`}>
-                <span style={{ flex: 1 }}>{r.kind}</span>
-                <span className="firth-dim">{r.status}</span>
-                <span className="firth-dim">{Object.entries(r.provider_ref).map(([k, v]) => `${k}=${String(v)}`).join(' ')}</span>
-              </Row>
-            ))}
-          </Panel>
+          <PostgresCard resource={neonResource} databaseUrl={branchSecrets['DATABASE_URL']} />
+          <StorageCard resource={s3Resource} projectSecrets={projectSecrets} />
+          <ComputeCard resource={flyResource} />
           <Panel title="branches">
             <Row><TButton onClick={() => setCreating((c) => !c)}>[+ create branch]</TButton></Row>
             {creating && (

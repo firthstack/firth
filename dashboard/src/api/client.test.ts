@@ -48,4 +48,23 @@ describe('Api', () => {
     expect(url).toBe('http://api/projects/p1')
     expect(init.method).toBe('DELETE')
   })
+
+  it('getSecrets with branch hits GET /projects/:id/secrets?branch=... and returns .secrets', async () => {
+    const fetcher = vi.fn(async () => jsonRes(200, { secrets: { DATABASE_URL: 'postgres://u:p@h/db' } }))
+    const api = new Api('http://api', () => 'tok-1', fetcher as any)
+    const secrets = await api.getSecrets('p1', 'b1')
+    expect(secrets).toEqual({ DATABASE_URL: 'postgres://u:p@h/db' })
+    const [url, init] = fetcher.mock.calls[0] as any
+    expect(url).toBe('http://api/projects/p1/secrets?branch=b1')
+    expect(init.method).toBe('GET')
+  })
+
+  it('getSecrets without branch hits GET /projects/:id/secrets (no query string)', async () => {
+    const fetcher = vi.fn(async () => jsonRes(200, { secrets: { AWS_ACCESS_KEY_ID: 'tid_x' } }))
+    const api = new Api('http://api', () => 'tok-1', fetcher as any)
+    const secrets = await api.getSecrets('p1')
+    expect(secrets).toEqual({ AWS_ACCESS_KEY_ID: 'tid_x' })
+    const [url] = fetcher.mock.calls[0] as any
+    expect(url).toBe('http://api/projects/p1/secrets')
+  })
 })
