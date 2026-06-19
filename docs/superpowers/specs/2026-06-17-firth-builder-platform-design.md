@@ -2,14 +2,13 @@
 
 > 日期:2026-06-17
 > 状态:设计已收敛,待 review → 转实现 plan。
-> 关系:本 spec 是 firth 战略方向的 v1 产品落地。战略与架构总览已收敛进 [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) 与 [`README.md`](../../../README.md)(原 `PIVOT-THESIS.md` / `DISCOVERY-INTERVIEW.md` 的结论已转移到那里,文件已删除)。
-> 下文中提到的 "thesis §N" 指的是当时那份 pivot thesis 的章节,结论现归入 ARCHITECTURE.md / README.md。
+> 关系:本 spec 是 firth v1 的产品/技术设计。架构总览见 [`ARCHITECTURE.md`](../../../ARCHITECTURE.md),产品概览见 [`README.md`](../../../README.md)。
 
 ---
 
 ## 0. 一句话
 
-**firth 是一个面向 agent 和 developer 的 builder platform:用户建账户、建项目,每个项目编排三种第三方基础资源(Neon DB / S3 storage / Fly.io compute),并叠加统一 secret 管理、运行时 observability、故障分析。firth 不自营资源、不赚资源差价——它做的是 integration + 治理服务(= thesis 里不可替代的「信任/控制」层)。**
+**firth 是一个面向 agent 和 developer 的 builder platform:用户建账户、建项目,每个项目编排三种第三方基础资源(Neon DB / S3 storage / Fly.io compute),并叠加统一 secret 管理、运行时 observability、故障分析。firth 不自营资源、不赚资源差价——它做的是 integration + 治理服务。**
 
 ---
 
@@ -17,7 +16,7 @@
 
 | 决策 | 取值 | 理由 / 后果 |
 |---|---|---|
-| **角色** | 第三方资源的 **orchestrator**,不是 reseller | 资源成本透传,不是盈利点;盈利 = integration + 治理。软化「裁判=运动员」反激励 |
+| **角色** | 第三方资源的 **orchestrator**,不是 reseller | 资源成本透传,firth 不赚资源差价;产品是 integration + 治理 |
 | **核心** | 控制/integration 是产品,资源是载体 | 「不坐进资源,就托不住 secret、观测不到 observe/recover」——资源是凭证咽喉的必要载体 |
 | **账户归属** | firth 为 **account-of-record**,成本透传 | firth 用自己配置的 Neon/S3/Fly key 在自己 org 下 provision。凭证 by construction 流经 firth |
 | **资源三件套** | Neon(DB) / S3(storage) / **Fly.io**(compute) | Fly 用现有 credits,适合产品验证。Railway 已弃用 |
@@ -140,7 +139,7 @@ interface ProviderAdapter {
 
 **branch ≈ Neon DB branch + 该 branch 专属 secret(连接串)+ 同 bucket + 可重部署的 compute。**
 
-**诚实 caveat(留洞、不假装覆盖):** storage 共享 → branch **对 S3 没有隔离**,agent 在 branch 里删/改对象会影响主 branch,丢弃 branch 救不回。**「branch = undo」只对 DB 成立,storage 的恢复需另一条路**(S3 versioning,或 observe + 合成补偿动作)——这是 thesis Recover 层在 v1 留的已知洞。
+**诚实 caveat(留洞、不假装覆盖):** storage 共享 → branch **对 S3 没有隔离**,agent 在 branch 里删/改对象会影响主 branch,丢弃 branch 救不回。**「branch = undo」只对 DB 成立,storage 的恢复需另一条路**(S3 versioning,或 observe + 合成补偿动作)——这是 v1 留的已知洞,恢复机制是后续工作。
 
 **派生 UX 后果:** compute 只有一个 Fly app(project 级),「在某 branch 部署」= 把它重新指向该 branch 的 DB 再 deploy。**同一时刻只服务一个 branch 的 compute**,切 branch 靠 redeploy。多 branch 并行 compute 是 v2。
 
@@ -209,7 +208,6 @@ CLI →(InsForge auth token)→ 控制面
 
 ## 12. 开放项 / 风险
 
-- thesis §5 时机风险不变:「agent 上生产」窗口。本 spec 是 dev/pre-prod 进场的载体。
-- storage 无隔离的 Recover 洞(§6)——v2 解决。
+- storage 无隔离的恢复洞(§6)——v2 解决。
 - account-of-record 让 firth 持 master 凭证 = 高攻击面,§5 缓解但不消除。
 - Fly credits 耗尽后的 compute 成本结构(产品验证期可接受)。
