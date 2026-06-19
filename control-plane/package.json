@@ -6,11 +6,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "dev": "tsx src/index.ts",
-    "live:neon": "tsx scripts/live-neon-check.ts",
-    "live:fly": "tsx scripts/live-fly-check.ts",
-    "live:tigris": "tsx scripts/live-tigris-check.ts",
-    "live:deploy": "tsx scripts/live-deploy-check.ts"
+    "dev": "tsx --env-file-if-exists=.env src/index.ts",
+    "live:neon": "tsx --env-file-if-exists=.env scripts/live-neon-check.ts",
+    "live:fly": "tsx --env-file-if-exists=.env scripts/live-fly-check.ts",
+    "live:tigris": "tsx --env-file-if-exists=.env scripts/live-tigris-check.ts",
+    "live:deploy": "tsx --env-file-if-exists=.env scripts/live-deploy-check.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
