@@ -2,7 +2,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 
-export type CliConfig = { apiUrl: string; insforge?: { baseUrl: string; anonKey: string }; token?: string }
+export type CliConfig = { apiUrl: string; token?: string }
 
 const DEFAULT_API = 'http://localhost:8080'
 const gpath = (home: string) => join(home, '.firth', 'config.json')

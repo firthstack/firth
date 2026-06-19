@@ -12,11 +12,11 @@ test('apiUrl precedence: env > file > default', () => {
   expect(readConfig(home, { FIRTH_API_URL: 'https://env.example' }).apiUrl).toBe('https://env.example')
 })
 
-test('writeConfig round-trips token + insforge', () => {
+test('writeConfig round-trips token', () => {
   const home = mkdtempSync(join(tmpdir(), 'firth-'))
-  writeConfig({ apiUrl: 'x', token: 't', insforge: { baseUrl: 'b', anonKey: 'a' } }, home)
+  writeConfig({ apiUrl: 'x', token: 't' }, home)
   const c = readConfig(home, {})
-  expect(c.token).toBe('t'); expect(c.insforge?.anonKey).toBe('a')
+  expect(c.token).toBe('t')
 })
 
 test('project link round-trips', () => {

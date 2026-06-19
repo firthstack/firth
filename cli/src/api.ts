@@ -50,4 +50,7 @@ export class FirthApi {
   }
   deleteProject(id: string) { return this.req('DELETE', `/projects/${id}`) }
   deleteBranch(projectId: string, branchId: string) { return this.req('DELETE', `/projects/${projectId}/branches/${branchId}`) }
+  login(email: string, password: string): Promise<{ token: string; user: { id: string; email: string } }> {
+    return this.req('POST', '/auth/login', { email, password })
+  }
 }
