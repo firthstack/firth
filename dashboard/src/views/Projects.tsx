@@ -48,7 +48,7 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
       )}
       {loading && <p className="firth-dim">loading...</p>}
       {error && <p className="firth-error">! {error}</p>}
-      {!loading && projects.length === 0 && <p className="firth-dim">no projects yet</p>}
+      {!loading && projects.length === 0 && <p className="firth-dim">-- none --</p>}
       {projects.map((p) => (
         <Row key={p.id}>
           <span style={{ flex: 1 }}>{p.name}</span>
