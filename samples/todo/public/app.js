@@ -120,6 +120,7 @@ clearBtn.addEventListener('click', async () => {
 })
 
 for (const b of filterBtns) b.addEventListener('click', () => { filter = b.dataset.filter; render() })
+errorEl.addEventListener('click', clearError)
 
 ;(async () => {
   try { todos = await api('GET', '/api/todos'); clearError(); render() }

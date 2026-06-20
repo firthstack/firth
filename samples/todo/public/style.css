@@ -13,7 +13,7 @@ body {
 h1 { font-size: 28px; margin: 0 0 16px; }
 .error {
   background: #fee2e2; color: var(--danger); border: 1px solid #fecaca;
-  padding: 8px 12px; border-radius: 8px; margin-bottom: 12px;
+  padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; cursor: pointer;
 }
 .new { display: flex; gap: 8px; margin-bottom: 16px; }
 .new input {
