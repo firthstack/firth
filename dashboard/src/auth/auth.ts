@@ -9,6 +9,18 @@ export interface Auth {
 }
 
 const TOKEN_KEY = 'firth_token'
+const REFRESH_KEY = 'firth_refresh_token'
+
+export function getStoredToken(): string | null { return localStorage.getItem(TOKEN_KEY) }
+export function getStoredRefreshToken(): string | null { return localStorage.getItem(REFRESH_KEY) }
+export function setStoredTokens(t: { token: string; refreshToken: string }): void {
+  localStorage.setItem(TOKEN_KEY, t.token)
+  localStorage.setItem(REFRESH_KEY, t.refreshToken)
+}
+export function clearStoredTokens(): void {
+  localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(REFRESH_KEY)
+}
 
 export function createControlPlaneAuth(apiUrl: string, fetcher: typeof fetch = (...a) => fetch(...a)): Auth {
   async function call(path: string, init: RequestInit) {
@@ -35,11 +47,12 @@ export function createControlPlaneAuth(apiUrl: string, fetcher: typeof fetch = (
     },
 
     async signIn(email, password) {
-      const { token, user } = await call('/auth/login', {
+      const { token, refreshToken, user } = await call('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       })
       localStorage.setItem(TOKEN_KEY, token)
+      if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken)
       return { user, token }
     },
 
@@ -50,6 +63,7 @@ export function createControlPlaneAuth(apiUrl: string, fetcher: typeof fetch = (
       })
       if (!data.needsVerification && data.token && data.user) {
         localStorage.setItem(TOKEN_KEY, data.token)
+        if (data.refreshToken) localStorage.setItem(REFRESH_KEY, data.refreshToken)
         return { needsVerification: false, user: data.user, token: data.token }
       }
       return { needsVerification: true }
@@ -64,6 +78,7 @@ export function createControlPlaneAuth(apiUrl: string, fetcher: typeof fetch = (
 
     async signOut() {
       localStorage.removeItem(TOKEN_KEY)
+      localStorage.removeItem(REFRESH_KEY)
     },
   }
 }
