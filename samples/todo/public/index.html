@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Firth Todo</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="app">
+    <h1>Todo</h1>
+    <div id="error" class="error" role="alert" hidden title="Click to dismiss"></div>
+    <form id="new-form" class="new">
+      <input id="new-input" type="text" placeholder="What needs doing?" autocomplete="off" maxlength="500" />
+      <button type="submit">Add</button>
+    </form>
+    <ul id="list" class="list"></ul>
+    <footer class="footer">
+      <span id="count" class="count"></span>
+      <div class="filters">
+        <button type="button" data-filter="all" class="active">All</button>
+        <button type="button" data-filter="active">Active</button>
+        <button type="button" data-filter="completed">Completed</button>
+      </div>
+      <button type="button" id="clear-completed" class="clear">Clear completed</button>
+    </footer>
+  </main>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
