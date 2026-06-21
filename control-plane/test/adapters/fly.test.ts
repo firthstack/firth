@@ -57,16 +57,58 @@ describe('FlyAdapter.deploy', () => {
   test('creates a machine with image + env, returns machineId + url', async () => {
     const { http, calls } = fakeHttp([
       { match: (u, i) => i.method === 'POST' && u.endsWith('/apps/firth-x-abc/machines'), body: { id: 'm-123', state: 'created' } },
+      // exposing a port also ensures public IPs; here they already exist → only the existence query runs
+      { match: (u, i) => u.includes('graphql') && i.body.includes('query('), body: { data: { app: { sharedIpAddress: '1.2.3.4', ipAddresses: { nodes: [{ address: '2a09::1', type: 'v6' }] } } } } },
     ])
     const adapter = new FlyAdapter('fly_tok', 'org', http)
     const handle = { kind: 'fly' as const, providerRef: { flyApp: 'firth-x-abc', orgSlug: 'org' } }
     const out = await adapter.deploy(handle, { image: 'nginx:alpine', env: { DATABASE_URL: 'postgresql://c' }, port: 80 })
     expect(out).toEqual({ machineId: 'm-123', url: 'https://firth-x-abc.fly.dev' })
-    const body = JSON.parse(calls[0].init.body)
+    const body = JSON.parse(calls[0].init.body) // machine create is the first call
     expect(body.config.image).toBe('nginx:alpine')
     expect(body.config.env.DATABASE_URL).toBe('postgresql://c')
     expect(body.config.guest).toEqual({ cpu_kind: 'shared', cpus: 1, memory_mb: 256 })
     expect(body.config.services[0].internal_port).toBe(80)
+  })
+
+  test('exposing a port allocates a shared v4 + dedicated v6 when the app has none', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
+      { match: (u, i) => u.includes('graphql') && i.body.includes('query('), body: { data: { app: { sharedIpAddress: null, ipAddresses: { nodes: [] } } } } },
+      { match: (u, i) => u.includes('graphql') && i.body.includes('shared_v4'), body: { data: { allocateIpAddress: { app: { sharedIpAddress: '1.2.3.4' } } } } },
+      { match: (u, i) => u.includes('graphql') && i.body.includes('"type":"v6"'), body: { data: { allocateIpAddress: { ipAddress: { address: '2a09::1', type: 'v6' } } } } },
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    await adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'firth-x-abc', orgSlug: 'org' } }, { image: 'img', env: {}, port: 8080 })
+    const gql = calls.filter((c) => c.url.includes('graphql'))
+    expect(gql.length).toBe(3) // 1 existence query + 2 allocations
+    expect(gql.some((c) => c.init.body.includes('shared_v4'))).toBe(true)
+    expect(gql.some((c) => c.init.body.includes('"type":"v6"'))).toBe(true)
+    expect(gql[0].url).toBe('https://api.fly.io/graphql')
+    expect(gql[0].init.headers.Authorization).toBe('Bearer fly_tok') // same token, no leak in error paths
+  })
+
+  test('exposing a port does NOT re-allocate IPs that already exist (idempotent)', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
+      { match: (u, i) => u.includes('graphql') && i.body.includes('query('), body: { data: { app: { sharedIpAddress: '1.2.3.4', ipAddresses: { nodes: [{ address: '2a09::1', type: 'v6' }] } } } } },
+      // NOTE: no allocation routes — if the code tried to allocate, fakeHttp would throw "unexpected"
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    await adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'img', env: {}, port: 8080 })
+    const gql = calls.filter((c) => c.url.includes('graphql'))
+    expect(gql.length).toBe(1) // only the existence query
+    expect(gql.some((c) => c.init.body.includes('shared_v4'))).toBe(false)
+  })
+
+  test('deploy without a port allocates no IPs (no graphql calls)', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
+      // only /machines is mocked: any graphql POST would throw "unexpected" and fail the test
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    await adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'img', env: {} })
+    expect(calls.some((c) => c.url.includes('graphql'))).toBe(false)
   })
 
   test('omits services when no port is given', async () => {
