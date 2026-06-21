@@ -89,6 +89,17 @@ export class FlyAdapter implements ComputeAdapter {
   async mintCredentials(): Promise<SecretBundle> { return {} }
   async readUsage(): Promise<UsageSnapshot> { return {} }
 
+  private async listMachines(flyApp: string): Promise<Array<{ id?: string }>> {
+    const data = await this.call('GET', `/apps/${flyApp}/machines`)
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data?.machines)) return data.machines
+    return []
+  }
+
+  private async destroyMachine(flyApp: string, id: string): Promise<void> {
+    await this.call('DELETE', `/apps/${flyApp}/machines/${id}?force=true`)
+  }
+
   async deploy(handle: ResourceHandle, opts: DeployOpts): Promise<DeployResult> {
     const ref = handle.providerRef as FlyRef
     const config: Record<string, unknown> = {
@@ -104,8 +115,18 @@ export class FlyAdapter implements ComputeAdapter {
       }]
     }
     const data = await this.call('POST', `/apps/${ref.flyApp}/machines`, { config })
+    // Guard before the replace loop: without a new id, `m.id !== data.id` would be true for every
+    // machine and we'd destroy them ALL (including the one just created). Fail fast instead.
+    if (!data?.id) throw new Error('fly machine create returned no id')
     // Only when we expose a port (and therefore services) does the app need to be publicly reachable.
     if (opts.port) await this.ensurePublicIps(ref.flyApp)
+    // Deploy REPLACES, not accumulates: the new machine is up, so destroy every other machine on the
+    // app. Without this, each deploy stacks a machine and the Fly proxy round-robins across stale code.
+    // A failure here propagates, but the new machine is already serving and a retry is idempotent
+    // (it spares the newest machine and destroys the rest).
+    for (const m of await this.listMachines(ref.flyApp)) {
+      if (m.id && m.id !== data.id) await this.destroyMachine(ref.flyApp, m.id)
+    }
     return { machineId: data.id, url: `https://${ref.flyApp}.fly.dev` }
   }
 }

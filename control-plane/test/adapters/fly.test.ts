@@ -54,11 +54,16 @@ describe('FlyAdapter', () => {
 })
 
 describe('FlyAdapter.deploy', () => {
+  // After a successful deploy the adapter lists machines and destroys the stale ones. A GET /machines
+  // route returning only the just-created machine means the replace step finds nothing to destroy.
+  const onlyNew = (id: string) => ({ match: (u: string, i: any) => i.method === 'GET' && u.endsWith('/machines'), body: [{ id }] })
+
   test('creates a machine with image + env, returns machineId + url', async () => {
     const { http, calls } = fakeHttp([
       { match: (u, i) => i.method === 'POST' && u.endsWith('/apps/firth-x-abc/machines'), body: { id: 'm-123', state: 'created' } },
       // exposing a port also ensures public IPs; here they already exist → only the existence query runs
       { match: (u, i) => u.includes('graphql') && i.body.includes('query('), body: { data: { app: { sharedIpAddress: '1.2.3.4', ipAddresses: { nodes: [{ address: '2a09::1', type: 'v6' }] } } } } },
+      onlyNew('m-123'),
     ])
     const adapter = new FlyAdapter('fly_tok', 'org', http)
     const handle = { kind: 'fly' as const, providerRef: { flyApp: 'firth-x-abc', orgSlug: 'org' } }
@@ -77,6 +82,7 @@ describe('FlyAdapter.deploy', () => {
       { match: (u, i) => u.includes('graphql') && i.body.includes('query('), body: { data: { app: { sharedIpAddress: null, ipAddresses: { nodes: [] } } } } },
       { match: (u, i) => u.includes('graphql') && i.body.includes('shared_v4'), body: { data: { allocateIpAddress: { app: { sharedIpAddress: '1.2.3.4' } } } } },
       { match: (u, i) => u.includes('graphql') && i.body.includes('"type":"v6"'), body: { data: { allocateIpAddress: { ipAddress: { address: '2a09::1', type: 'v6' } } } } },
+      onlyNew('m-1'),
     ])
     const adapter = new FlyAdapter('fly_tok', 'org', http)
     await adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'firth-x-abc', orgSlug: 'org' } }, { image: 'img', env: {}, port: 8080 })
@@ -92,6 +98,7 @@ describe('FlyAdapter.deploy', () => {
     const { http, calls } = fakeHttp([
       { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
       { match: (u, i) => u.includes('graphql') && i.body.includes('query('), body: { data: { app: { sharedIpAddress: '1.2.3.4', ipAddresses: { nodes: [{ address: '2a09::1', type: 'v6' }] } } } } },
+      onlyNew('m-1'),
       // NOTE: no allocation routes — if the code tried to allocate, fakeHttp would throw "unexpected"
     ])
     const adapter = new FlyAdapter('fly_tok', 'org', http)
@@ -126,7 +133,7 @@ describe('FlyAdapter.deploy', () => {
   test('deploy without a port allocates no IPs (no graphql calls)', async () => {
     const { http, calls } = fakeHttp([
       { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
-      // only /machines is mocked: any graphql POST would throw "unexpected" and fail the test
+      onlyNew('m-1'),
     ])
     const adapter = new FlyAdapter('fly_tok', 'org', http)
     await adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'img', env: {} })
@@ -134,7 +141,10 @@ describe('FlyAdapter.deploy', () => {
   })
 
   test('omits services when no port is given', async () => {
-    const { http, calls } = fakeHttp([{ match: (u, i) => i.method === 'POST', body: { id: 'm-1' } }])
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
+      onlyNew('m-1'),
+    ])
     const adapter = new FlyAdapter('fly_tok', 'org', http)
     await adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'img', env: {} })
     expect(JSON.parse(calls[0].init.body).config.services).toBeUndefined()
@@ -145,5 +155,41 @@ describe('FlyAdapter.deploy', () => {
     const adapter = new FlyAdapter('fly_tok', 'org', http)
     await expect(adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'x', env: {} }))
       .rejects.toThrow(/fly POST \/apps\/a\/machines failed: 422/)
+  })
+
+  test('deploy destroys other machines on the app (replace, not accumulate)', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-new' } },
+      { match: (u, i) => i.method === 'GET' && u.endsWith('/machines'), body: [{ id: 'm-old1' }, { id: 'm-old2' }, { id: 'm-new' }] },
+      { match: (u, i) => i.method === 'DELETE' && u.includes('/machines/m-old1'), body: {} },
+      { match: (u, i) => i.method === 'DELETE' && u.includes('/machines/m-old2'), body: {} },
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    await adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'img', env: {} })
+    const deletes = calls.filter((c) => c.init.method === 'DELETE')
+    expect(deletes.length).toBe(2)
+    expect(deletes.every((c) => c.url.includes('force=true'))).toBe(true)
+    expect(deletes.some((c) => c.url.includes('/machines/m-new'))).toBe(false) // never destroys the new machine
+    expect(deletes.map((c) => c.url.match(/machines\/(m-old\d)/)![1]).sort()).toEqual(['m-old1', 'm-old2'])
+  })
+
+  test('throws and destroys nothing if machine create returns no id', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: {} }, // 200 but no id
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    await expect(adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'img', env: {} }))
+      .rejects.toThrow(/no id/)
+    expect(calls.some((c) => c.init.method === 'DELETE' || c.init.method === 'GET')).toBe(false) // replace loop never ran
+  })
+
+  test('deploy destroys nothing when only the new machine exists', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-new' } },
+      { match: (u, i) => i.method === 'GET' && u.endsWith('/machines'), body: [{ id: 'm-new' }] },
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    await adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'img', env: {} })
+    expect(calls.some((c) => c.init.method === 'DELETE')).toBe(false)
   })
 })
