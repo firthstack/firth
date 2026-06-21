@@ -108,4 +108,14 @@ describe('Api', () => {
     await expect(api.listProjects()).rejects.toMatchObject({ status: 401 })
     expect(cleared).toBe(true)
   })
+
+  it('listApprovals / approve / deny hit the right endpoints', async () => {
+    const seen: string[] = []
+    const fetcher = ((url: string) => { seen.push(url); return Promise.resolve(resp(200, { approvals: [{ id: 'a1', action: 'project.delete' }], approval: { id: 'a1' } })) }) as unknown as typeof fetch
+    const api = new Api('http://cp', () => 't', fetcher)
+    await api.listApprovals('p1', 'pending')
+    await api.approve('p1', 'a1')
+    await api.deny('p1', 'a1')
+    expect(seen).toEqual(['http://cp/projects/p1/approvals?status=pending', 'http://cp/projects/p1/approvals/a1/approve', 'http://cp/projects/p1/approvals/a1/deny'])
+  })
 })

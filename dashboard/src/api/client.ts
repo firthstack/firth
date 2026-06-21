@@ -94,4 +94,11 @@ export class Api {
     const q = branch ? `?branch=${encodeURIComponent(branch)}` : ''
     return this.req('GET', `/projects/${projectId}/secrets${q}`).then((r) => r.secrets)
   }
+
+  listApprovals(projectId: string, status?: string): Promise<Array<{ id: string; action: string; status: string; requested_at: string }>> {
+    const q = status ? `?status=${status}` : ''
+    return this.req('GET', `/projects/${projectId}/approvals${q}`).then((r) => r.approvals)
+  }
+  approve(projectId: string, id: string) { return this.req('POST', `/projects/${projectId}/approvals/${id}/approve`) }
+  deny(projectId: string, id: string) { return this.req('POST', `/projects/${projectId}/approvals/${id}/deny`) }
 }

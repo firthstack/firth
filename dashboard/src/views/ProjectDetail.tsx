@@ -205,6 +205,30 @@ function ComputeCard({ resources, branches }: { resources: Resource[]; branches:
 }
 
 // ---------------------------------------------------------------------------
+// Approvals panel
+// ---------------------------------------------------------------------------
+function ApprovalsPanel({ api, projectId }: { api: Api; projectId: string }) {
+  const [items, setItems] = useState<Array<{ id: string; action: string; requested_at: string }>>([])
+  const load = useCallback(() => { api.listApprovals(projectId, 'pending').then(setItems).catch(() => setItems([])) }, [api, projectId])
+  useEffect(() => { load() }, [load])
+  const decide = async (id: string, kind: 'approve' | 'deny') => { await (kind === 'approve' ? api.approve(projectId, id) : api.deny(projectId, id)); load() }
+  return (
+    <Panel title="approvals">
+      {items.length === 0 ? (
+        <p className="firth-dim">no pending approvals</p>
+      ) : items.map((a) => (
+        <Row key={a.id}>
+          <strong>{a.action}</strong>
+          <span className="firth-dim">{a.requested_at}</span>
+          <TButton onClick={() => decide(a.id, 'approve')}>[approve]</TButton>
+          <TButton onClick={() => decide(a.id, 'deny')}>[deny]</TButton>
+        </Row>
+      ))}
+    </Panel>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId: string; onBack: () => void }) {
@@ -281,6 +305,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
           <PostgresCard resource={neonResource} databaseUrl={branchSecrets['DATABASE_URL']} />
           <StorageCard resource={s3Resource} projectSecrets={projectSecrets} />
           <ComputeCard resources={detail?.resources ?? []} branches={detail?.branches ?? []} />
+          <ApprovalsPanel api={api} projectId={projectId} />
           <Panel title="branches">
             <Row><TButton onClick={() => setCreating((c) => !c)}>[+ create branch]</TButton></Row>
             <CliHint command="firth branch create <name>" note="# or from the cli — forks an isolated db branch" />
