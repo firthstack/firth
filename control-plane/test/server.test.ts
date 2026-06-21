@@ -508,6 +508,7 @@ test('POST /projects/:id/deploy-token 404 when the branch has no fly resource', 
   const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fly as any] })
   const r = await app.inject({ method: 'POST', url: '/projects/p1/deploy-token', headers: { authorization: 'Bearer good' }, payload: {} })
   expect(r.statusCode).toBe(404)
+  expect(r.json().error).toMatch(/fly resource/)
 })
 
 test('POST /projects/:id/deploy-token requires auth', async () => {

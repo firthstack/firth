@@ -15,7 +15,7 @@ export const defaultBuildRunner: BuildRunner = (cmd, args, opts) =>
     let output = ''
     child.stdout?.on('data', (b) => { const s = b.toString(); output += s; process.stdout.write(s) })
     child.stderr?.on('data', (b) => { const s = b.toString(); output += s; process.stderr.write(s) })
-    child.on('error', () => resolve({ code: -1, output }))
+    child.on('error', (err) => resolve({ code: -1, output: `${output}\n${err.message}` }))
     child.on('close', (code) => resolve({ code: code ?? -1, output }))
   })
 
