@@ -89,6 +89,17 @@ export class FlyAdapter implements ComputeAdapter {
   async mintCredentials(): Promise<SecretBundle> { return {} }
   async readUsage(): Promise<UsageSnapshot> { return {} }
 
+  private async listMachines(flyApp: string): Promise<Array<{ id?: string }>> {
+    const data = await this.call('GET', `/apps/${flyApp}/machines`)
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data?.machines)) return data.machines
+    return []
+  }
+
+  private async destroyMachine(flyApp: string, id: string): Promise<void> {
+    await this.call('DELETE', `/apps/${flyApp}/machines/${id}?force=true`)
+  }
+
   async deploy(handle: ResourceHandle, opts: DeployOpts): Promise<DeployResult> {
     const ref = handle.providerRef as FlyRef
     const config: Record<string, unknown> = {
@@ -106,6 +117,11 @@ export class FlyAdapter implements ComputeAdapter {
     const data = await this.call('POST', `/apps/${ref.flyApp}/machines`, { config })
     // Only when we expose a port (and therefore services) does the app need to be publicly reachable.
     if (opts.port) await this.ensurePublicIps(ref.flyApp)
+    // Deploy REPLACES, not accumulates: the new machine is up, so destroy every other machine on the
+    // app. Without this, each deploy stacks a machine and the Fly proxy round-robins across stale code.
+    for (const m of await this.listMachines(ref.flyApp)) {
+      if (m.id && m.id !== data.id) await this.destroyMachine(ref.flyApp, m.id)
+    }
     return { machineId: data.id, url: `https://${ref.flyApp}.fly.dev` }
   }
 }
