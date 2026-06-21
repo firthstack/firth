@@ -71,7 +71,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const project = await new ProjectsRepo(db).findById(uid, projectId)
     if (!project) throw new NotFoundError('project not found')
     const branches = await new BranchesRepo(db).listByProject(uid, projectId)
-    const resources = (await new ResourcesRepo(db).listByProject(uid, projectId)).map(publicResourceView)
+    // Hide destroyed resources (e.g. a deleted branch's Fly app, soft-kept as a
+    // teardown tombstone) so the detail view shows only live resources.
+    const resources = (await new ResourcesRepo(db).listByProject(uid, projectId))
+      .filter((r) => r.status !== 'destroyed')
+      .map(publicResourceView)
     return reply.send({ project, branches, resources })
   })
 
