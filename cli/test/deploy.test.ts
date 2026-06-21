@@ -106,3 +106,17 @@ test('source/image deploy: approval_required response is reported, exits 1', asy
   expect(await deploy(['--image', 'nginx'], d as any)).toBe(1)
   expect(out.join('\n')).toMatch(/requires approval \(id a9\)/)
 })
+
+test('source mode: approval_required response is reported, exits 1', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)
+  writeFile(join(dir, 'Dockerfile'), 'FROM nginx\n')
+  const api = {
+    mintDeployToken: async () => ({ token: 'FlyV1 tok', expirySeconds: 1200, flyApp: 'a-main' }),
+    deploy: async () => ({ status: 'approval_required', approvalId: 'a9', action: 'deploy' }),
+  }
+  const buildRunner: BuildRunner = async () => ({ code: 0, output: MANIFEST })
+  const out: string[] = []
+  const d = { print: (s: string) => out.push(s), home: dir, cwd: dir, env: {}, makeApi: () => api, buildRunner }
+  expect(await deploy(['.'], d as any)).toBe(1)
+  expect(out.join('\n')).toMatch(/requires approval \(id a9\)/)
+})
