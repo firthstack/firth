@@ -101,6 +101,28 @@ describe('FlyAdapter.deploy', () => {
     expect(gql.some((c) => c.init.body.includes('shared_v4'))).toBe(false)
   })
 
+  test('graphql non-2xx throws with status only (no token leak)', async () => {
+    const { http } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
+      { match: (u) => u.includes('graphql'), status: 500, body: {} },
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    const handle = { kind: 'fly' as const, providerRef: { flyApp: 'a', orgSlug: 'o' } }
+    await expect(adapter.deploy(handle, { image: 'img', env: {}, port: 8080 })).rejects.toThrow(/fly graphql failed: 500/)
+    await expect(adapter.deploy(handle, { image: 'img', env: {}, port: 8080 })).rejects.not.toThrow(/fly_tok/)
+  })
+
+  test('graphql errors[] payload throws the server message, not the token', async () => {
+    const { http } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
+      { match: (u) => u.includes('graphql'), status: 200, body: { errors: [{ message: 'boom' }] } },
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    const handle = { kind: 'fly' as const, providerRef: { flyApp: 'a', orgSlug: 'o' } }
+    await expect(adapter.deploy(handle, { image: 'img', env: {}, port: 8080 })).rejects.toThrow(/fly graphql error: boom/)
+    await expect(adapter.deploy(handle, { image: 'img', env: {}, port: 8080 })).rejects.not.toThrow(/fly_tok/)
+  })
+
   test('deploy without a port allocates no IPs (no graphql calls)', async () => {
     const { http, calls } = fakeHttp([
       { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
