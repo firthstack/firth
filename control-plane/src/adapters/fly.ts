@@ -100,6 +100,26 @@ export class FlyAdapter implements ComputeAdapter {
     await this.call('DELETE', `/apps/${flyApp}/machines/${id}?force=true`)
   }
 
+  async mintDeployToken(handle: ResourceHandle, opts: { expirySeconds: number }): Promise<{ token: string; expirySeconds: number }> {
+    const ref = handle.providerRef as FlyRef
+    const minutes = Math.max(1, Math.round(opts.expirySeconds / 60))
+    // [VERIFY-LIVE] CreateLimitedAccessTokenInput shape (profile name, profileParams.app_id form,
+    // whether organizationId is required when app-scoped). Pinned live in scripts/live-deploy-token-check.ts.
+    const data = await this.graphql(
+      'mutation($input: CreateLimitedAccessTokenInput!) { createLimitedAccessToken(input: $input) { token } }',
+      { input: {
+        name: `firth-deploy-${ref.flyApp}`,
+        organizationId: this.orgSlug,
+        profile: 'deploy',
+        profileParams: { app_id: ref.flyApp },
+        expiry: `${minutes}m`,
+      } },
+    )
+    const token = data?.createLimitedAccessToken?.token
+    if (!token) throw new Error('fly did not return a deploy token')
+    return { token, expirySeconds: opts.expirySeconds }
+  }
+
   async deploy(handle: ResourceHandle, opts: DeployOpts): Promise<DeployResult> {
     const ref = handle.providerRef as FlyRef
     const config: Record<string, unknown> = {
