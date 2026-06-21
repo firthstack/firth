@@ -198,6 +198,8 @@ describe('ProjectDetail', () => {
     })
     render(<ProjectDetail api={api} projectId="p1" onBack={vi.fn()} />)
     expect(await screen.findByText(/secrets require approval/i)).toBeInTheDocument()
+    // Gated path must not also surface an error banner
+    expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument()
     // Resources and approvals still render (page does not crash)
     expect(screen.getByText('postgres')).toBeInTheDocument()
     expect(screen.getByText('approvals')).toBeInTheDocument()

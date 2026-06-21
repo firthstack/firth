@@ -236,6 +236,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
   const [projectSecrets, setProjectSecrets] = useState<Record<string, string>>({})
   const [branchSecrets, setBranchSecrets] = useState<Record<string, string>>({})
   const [secretsGated, setSecretsGated] = useState(false)
+  const [secretsApprovalId, setSecretsApprovalId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -244,7 +245,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
   const [confirmBranch, setConfirmBranch] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    setLoading(true); setError(null); setSecretsGated(false)
+    setLoading(true); setError(null); setSecretsGated(false); setSecretsApprovalId(null)
     try {
       const d = await api.getProject(projectId)
       setDetail(d)
@@ -253,7 +254,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
       try {
         const ps = await api.getSecrets(projectId)
         setProjectSecrets(ps.secrets ?? {})
-        if (ps.status === 'approval_required') setSecretsGated(true)
+        if (ps.status === 'approval_required') { setSecretsGated(true); setSecretsApprovalId(ps.approvalId ?? null) }
       } catch {
         setError('failed to load project secrets')
       }
@@ -305,7 +306,11 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
       {detail && (
         <>
           {secretsGated && (
-            <p className="firth-dim">🔒 secrets require approval — approve the pending request in the Approvals panel below (or run `firth approve &lt;id&gt;`), then reload.</p>
+            <p className="firth-dim">
+              {secretsApprovalId
+                ? <><span aria-hidden="true">🔒</span>{` secrets require approval — run \`firth approve ${secretsApprovalId}\` or approve in the Approvals panel below, then reload.`}</>
+                : <><span aria-hidden="true">🔒</span>{' secrets require approval — approve the pending request in the Approvals panel below (or run `firth approve <id>`), then reload.'}</>}
+            </p>
           )}
           <PostgresCard resource={neonResource} databaseUrl={branchSecrets['DATABASE_URL']} />
           <StorageCard resource={s3Resource} projectSecrets={projectSecrets} />

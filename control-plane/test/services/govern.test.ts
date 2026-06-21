@@ -71,9 +71,12 @@ test('listApprovals: returns pending approvals filtered by status', async () => 
   expect(pending[0].id).toBe((g3 as any).approvalId)
   expect(pending[0].status).toBe('pending')
 
-  // listApprovals without filter returns all approvals for the project
+  // listApprovals without filter returns all approvals for the project (exactly 2: the consumed grant and the pending one)
   const all = await svc.listApprovals('o1', 'p1')
-  expect(all.length).toBeGreaterThanOrEqual(2)
+  expect(all).toHaveLength(2)
+  const allIds = all.map((a) => a.id)
+  expect(allIds).toContain((g1 as any).approvalId)
+  expect(allIds).toContain((g3 as any).approvalId)
 })
 
 test('effectivePolicy merges defaults with overrides', async () => {

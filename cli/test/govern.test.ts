@@ -21,6 +21,14 @@ test('approvals lists pending', async () => {
   expect(out.join('\n')).toMatch(/project\.delete/)
 })
 
+test('approvals returns 0 and prints "no pending approvals" when api returns null', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)
+  const api = { listApprovals: async () => null }
+  const { d, out } = deps(dir, api)
+  expect(await approvals([], d as any)).toBe(0)
+  expect(out.join('\n')).toMatch(/no pending approvals/)
+})
+
 test('approve calls the api', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)
   const calls: any[] = []
