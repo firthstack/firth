@@ -23,7 +23,7 @@ function linkedProjectId(deps: Deps): string | null {
 export async function approvals(_argv: string[], deps: Deps): Promise<number> {
   const projectId = linkedProjectId(deps); if (!projectId) return 1
   const list = await apiFromDeps(deps).listApprovals(projectId, 'pending')
-  if (list.length === 0) { deps.print('no pending approvals'); return 0 }
+  if (!list || list.length === 0) { deps.print('no pending approvals'); return 0 }
   for (const a of list) deps.print(`${a.id}  ${a.action}  (requested ${a.requested_at})`)
   return 0
 }

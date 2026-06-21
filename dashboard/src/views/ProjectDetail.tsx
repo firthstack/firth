@@ -211,7 +211,7 @@ function ApprovalsPanel({ api, projectId }: { api: Api; projectId: string }) {
   const [items, setItems] = useState<Array<{ id: string; action: string; requested_at: string }>>([])
   const load = useCallback(() => { api.listApprovals(projectId, 'pending').then(setItems).catch(() => setItems([])) }, [api, projectId])
   useEffect(() => { load() }, [load])
-  const decide = async (id: string, kind: 'approve' | 'deny') => { await (kind === 'approve' ? api.approve(projectId, id) : api.deny(projectId, id)); load() }
+  const decide = useCallback(async (id: string, kind: 'approve' | 'deny') => { await (kind === 'approve' ? api.approve(projectId, id) : api.deny(projectId, id)); load() }, [api, projectId, load])
   return (
     <Panel title="approvals">
       {items.length === 0 ? (
@@ -235,6 +235,8 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
   const [detail, setDetail] = useState<Detail | null>(null)
   const [projectSecrets, setProjectSecrets] = useState<Record<string, string>>({})
   const [branchSecrets, setBranchSecrets] = useState<Record<string, string>>({})
+  const [secretsGated, setSecretsGated] = useState(false)
+  const [secretsApprovalId, setSecretsApprovalId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -243,7 +245,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
   const [confirmBranch, setConfirmBranch] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    setLoading(true); setError(null)
+    setLoading(true); setError(null); setSecretsGated(false); setSecretsApprovalId(null)
     try {
       const d = await api.getProject(projectId)
       setDetail(d)
@@ -251,7 +253,8 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
       // Fetch secrets; allow partial failure so resources still render
       try {
         const ps = await api.getSecrets(projectId)
-        setProjectSecrets(ps)
+        setProjectSecrets(ps.secrets ?? {})
+        if (ps.status === 'approval_required') { setSecretsGated(true); setSecretsApprovalId(ps.approvalId ?? null) }
       } catch {
         setError('failed to load project secrets')
       }
@@ -260,7 +263,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
       if (def) {
         try {
           const bs = await api.getSecrets(projectId, def.id)
-          setBranchSecrets(bs)
+          setBranchSecrets(bs.secrets ?? {})
         } catch {
           // branch secrets failure is non-fatal; DATABASE_URL just won't show
         }
@@ -302,6 +305,13 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
       {error && <p className="firth-error">! {error}</p>}
       {detail && (
         <>
+          {secretsGated && (
+            <p className="firth-dim">
+              {secretsApprovalId
+                ? <><span aria-hidden="true">🔒</span>{` secrets require approval — run \`firth approve ${secretsApprovalId}\` or approve in the Approvals panel below, then reload.`}</>
+                : <><span aria-hidden="true">🔒</span>{' secrets require approval — approve the pending request in the Approvals panel below (or run `firth approve <id>`), then reload.'}</>}
+            </p>
+          )}
           <PostgresCard resource={neonResource} databaseUrl={branchSecrets['DATABASE_URL']} />
           <StorageCard resource={s3Resource} projectSecrets={projectSecrets} />
           <ComputeCard resources={detail?.resources ?? []} branches={detail?.branches ?? []} />

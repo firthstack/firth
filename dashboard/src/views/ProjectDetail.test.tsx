@@ -30,8 +30,8 @@ function fakeApi(overrides: Partial<Api> = {}): Api {
     deleteBranch: vi.fn(async () => ({})),
     getSecrets: vi.fn(async (_pid: string, branch?: string) =>
       branch
-        ? { DATABASE_URL: 'postgres://u:p@h/db' }
-        : { AWS_ACCESS_KEY_ID: 'tid_x', AWS_SECRET_ACCESS_KEY: 'sek_y', AWS_ENDPOINT_URL_S3: 'https://t3.storage.dev', BUCKET_NAME: 'firth-first-ab12', AWS_REGION: 'auto' }
+        ? { secrets: { DATABASE_URL: 'postgres://u:p@h/db' } }
+        : { secrets: { AWS_ACCESS_KEY_ID: 'tid_x', AWS_SECRET_ACCESS_KEY: 'sek_y', AWS_ENDPOINT_URL_S3: 'https://t3.storage.dev', BUCKET_NAME: 'firth-first-ab12', AWS_REGION: 'auto' } }
     ),
     listApprovals: vi.fn(async () => []),
     approve: vi.fn(async () => ({})),
@@ -176,5 +176,32 @@ describe('ProjectDetail', () => {
     expect(await screen.findByText('project.delete')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /approve/i }))
     expect(approved).toEqual(['a1'])
+  })
+
+  it('approvals panel deny button calls deny with the approval id', async () => {
+    const denied: string[] = []
+    const api = fakeApi({
+      listApprovals: vi.fn(async () => [{ id: 'a1', action: 'project.delete', status: 'pending', requested_at: 'now' }]),
+      deny: vi.fn(async (_pid: string, id: string) => { denied.push(id); return {} }),
+    })
+    render(<ProjectDetail api={api} projectId="p1" onBack={vi.fn()} />)
+    expect(await screen.findByText('project.delete')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /deny/i }))
+    expect(denied).toEqual(['a1'])
+  })
+
+  it('shows a secrets-require-approval notice when getSecrets returns approval_required', async () => {
+    const api = fakeApi({
+      getSecrets: vi.fn(async (_pid: string, branch?: string) =>
+        branch ? { secrets: {} } : { status: 'approval_required', approvalId: 'a9', action: 'secrets.read' }
+      ),
+    })
+    render(<ProjectDetail api={api} projectId="p1" onBack={vi.fn()} />)
+    expect(await screen.findByText(/secrets require approval/i)).toBeInTheDocument()
+    // Gated path must not also surface an error banner
+    expect(screen.queryByText(/failed to load/i)).not.toBeInTheDocument()
+    // Resources and approvals still render (page does not crash)
+    expect(screen.getByText('postgres')).toBeInTheDocument()
+    expect(screen.getByText('approvals')).toBeInTheDocument()
   })
 })

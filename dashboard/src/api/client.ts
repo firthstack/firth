@@ -90,9 +90,9 @@ export class Api {
     return this.req('DELETE', `/projects/${projectId}/branches/${branchId}`)
   }
 
-  getSecrets(projectId: string, branch?: string): Promise<Record<string, string>> {
+  getSecrets(projectId: string, branch?: string): Promise<{ secrets?: Record<string, string>; status?: string; approvalId?: string; action?: string }> {
     const q = branch ? `?branch=${encodeURIComponent(branch)}` : ''
-    return this.req('GET', `/projects/${projectId}/secrets${q}`).then((r) => r.secrets ?? {})
+    return this.req('GET', `/projects/${projectId}/secrets${q}`)
   }
 
   listApprovals(projectId: string, status?: string): Promise<Array<{ id: string; action: string; status: string; requested_at: string }>> {

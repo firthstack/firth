@@ -53,11 +53,11 @@ describe('Api', () => {
     expect(init.method).toBe('DELETE')
   })
 
-  it('getSecrets with branch hits GET /projects/:id/secrets?branch=... and returns .secrets', async () => {
+  it('getSecrets with branch hits GET /projects/:id/secrets?branch=... and returns the raw response', async () => {
     const fetcher = vi.fn(async () => jsonRes(200, { secrets: { DATABASE_URL: 'postgres://u:p@h/db' } }))
     const api = new Api('http://api', () => 'tok-1', fetcher as any)
-    const secrets = await api.getSecrets('p1', 'b1')
-    expect(secrets).toEqual({ DATABASE_URL: 'postgres://u:p@h/db' })
+    const result = await api.getSecrets('p1', 'b1')
+    expect(result).toEqual({ secrets: { DATABASE_URL: 'postgres://u:p@h/db' } })
     const [url, init] = fetcher.mock.calls[0] as any
     expect(url).toBe('http://api/projects/p1/secrets?branch=b1')
     expect(init.method).toBe('GET')
@@ -66,8 +66,8 @@ describe('Api', () => {
   it('getSecrets without branch hits GET /projects/:id/secrets (no query string)', async () => {
     const fetcher = vi.fn(async () => jsonRes(200, { secrets: { AWS_ACCESS_KEY_ID: 'tid_x' } }))
     const api = new Api('http://api', () => 'tok-1', fetcher as any)
-    const secrets = await api.getSecrets('p1')
-    expect(secrets).toEqual({ AWS_ACCESS_KEY_ID: 'tid_x' })
+    const result = await api.getSecrets('p1')
+    expect(result).toEqual({ secrets: { AWS_ACCESS_KEY_ID: 'tid_x' } })
     const [url] = fetcher.mock.calls[0] as any
     expect(url).toBe('http://api/projects/p1/secrets')
   })
@@ -119,9 +119,11 @@ describe('Api', () => {
     expect(seen).toEqual(['http://cp/projects/p1/approvals?status=pending', 'http://cp/projects/p1/approvals/a1/approve', 'http://cp/projects/p1/approvals/a1/deny'])
   })
 
-  it('getSecrets returns {} when the response carries no secrets (gated 202)', async () => {
+  it('getSecrets returns the raw body when the response is a gated 202 (approval_required)', async () => {
     const fetcher = (() => Promise.resolve(resp(202, { status: 'approval_required', approvalId: 'a1', action: 'secrets.read' }))) as unknown as typeof fetch
     const api = new Api('http://cp', () => 't', fetcher)
-    expect(await api.getSecrets('p1')).toEqual({})
+    const result = await api.getSecrets('p1')
+    expect(result).toMatchObject({ status: 'approval_required', approvalId: 'a1' })
+    expect(result.secrets).toBeUndefined()
   })
 })
