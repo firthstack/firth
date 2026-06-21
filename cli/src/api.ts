@@ -9,14 +9,48 @@ const realFetcher: Fetcher = async (url, init) => {
 }
 
 export class FirthApi {
-  constructor(private apiUrl: string, private token: string, private fetcher: Fetcher = realFetcher) {}
+  private refreshToken?: string
+  private onTokens?: (t: { token: string; refreshToken: string }) => void
+  constructor(
+    private apiUrl: string,
+    private token: string,
+    private fetcher: Fetcher = realFetcher,
+    opts: { refreshToken?: string; onTokens?: (t: { token: string; refreshToken: string }) => void } = {},
+  ) {
+    this.refreshToken = opts.refreshToken
+    this.onTokens = opts.onTokens
+  }
 
-  private async req(method: string, path: string, body?: unknown): Promise<any> {
-    const res = await this.fetcher(`${this.apiUrl}${path}`, {
+  private send(method: string, path: string, body?: unknown) {
+    return this.fetcher(`${this.apiUrl}${path}`, {
       method,
       headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
+  }
+
+  // Exchange the refresh token for a fresh pair. Direct call (not via send/req) so a
+  // failing refresh can't loop. Returns true and rotates this.token on success.
+  private async tryRefresh(): Promise<boolean> {
+    if (!this.refreshToken) return false
+    const res = await this.fetcher(`${this.apiUrl}/auth/refresh`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: this.refreshToken }),
+    })
+    if (res.status < 200 || res.status >= 300) { this.refreshToken = undefined; return false }
+    const data = await res.json()
+    this.token = data.token
+    this.refreshToken = data.refreshToken
+    this.onTokens?.({ token: data.token, refreshToken: data.refreshToken })
+    return true
+  }
+
+  private async req(method: string, path: string, body?: unknown): Promise<any> {
+    let res = await this.send(method, path, body)
+    if (res.status === 401 && this.refreshToken) {
+      if (await this.tryRefresh()) res = await this.send(method, path, body)
+      else throw new Error('session expired — run `firth login`')
+    }
     if (res.status < 200 || res.status >= 300) {
       let msg = ''
       try { msg = (await res.json())?.error ?? '' } catch { /* ignore */ }
@@ -53,7 +87,7 @@ export class FirthApi {
   }
   deleteProject(id: string) { return this.req('DELETE', `/projects/${id}`) }
   deleteBranch(projectId: string, branchId: string) { return this.req('DELETE', `/projects/${projectId}/branches/${branchId}`) }
-  login(email: string, password: string): Promise<{ token: string; user: { id: string; email: string } }> {
+  login(email: string, password: string): Promise<{ token: string; refreshToken: string; user: { id: string; email: string } }> {
     return this.req('POST', '/auth/login', { email, password })
   }
 }

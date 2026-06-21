@@ -15,8 +15,8 @@ export async function login(argv: string[], deps: CliDeps & { makeApi?: () => Pi
   const apiUrl = values['api-url'] ?? cfg.apiUrl
   const api = deps.makeApi ? deps.makeApi() : new FirthApi(apiUrl, '')
   try {
-    const { token } = await api.login(email, password)
-    writeConfig({ ...cfg, apiUrl, token }, deps.home)
+    const { token, refreshToken } = await api.login(email, password)
+    writeConfig({ ...cfg, apiUrl, token, refreshToken }, deps.home)
     deps.print(`signed in as ${email} (control plane: ${apiUrl})`)
     return 0
   } catch (e) {
@@ -28,6 +28,7 @@ export async function login(argv: string[], deps: CliDeps & { makeApi?: () => Pi
 export async function logout(_argv: string[], deps: CliDeps): Promise<number> {
   const cfg = readConfig(deps.home, deps.env)
   delete cfg.token
+  delete cfg.refreshToken
   writeConfig(cfg, deps.home)
   deps.print('signed out')
   return 0

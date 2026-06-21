@@ -43,3 +43,43 @@ test('deleteBranch sends DELETE /projects/:projectId/branches/:branchId', async 
   expect(calls[0].url).toBe('https://cp/projects/p1/branches/b1')
   expect(out.project).toBeDefined()
 })
+
+function resp(status: number, body: any) {
+  return { status, json: async () => body, text: async () => JSON.stringify(body) }
+}
+
+test('refreshes once on 401, persists the rotated pair, retries, and returns the result', async () => {
+  const seen: Array<{ url: string; auth?: string; body?: any }> = []
+  const queue = [
+    resp(401, { error: 'unauthorized' }),                         // 1st: GET /projects → expired
+    resp(200, { token: 'acc-2', refreshToken: 'ref-2' }),         // 2nd: POST /auth/refresh
+    resp(200, { projects: [{ id: 'p1' }] }),                      // 3rd: GET /projects retried
+  ]
+  const fetcher = (async (url: string, init: any) => {
+    seen.push({ url, auth: init.headers?.Authorization, body: init.body ? JSON.parse(init.body) : undefined })
+    return queue.shift()!
+  }) as any
+  let persisted: any
+  const api = new FirthApi('http://cp', 'acc-1', fetcher, { refreshToken: 'ref-1', onTokens: (t) => { persisted = t } })
+  const projects = await api.listProjects()
+  expect(projects).toEqual([{ id: 'p1' }])
+  expect(seen[1].url).toBe('http://cp/auth/refresh')
+  expect(seen[1].body).toEqual({ refreshToken: 'ref-1' })
+  expect(persisted).toEqual({ token: 'acc-2', refreshToken: 'ref-2' })
+  expect(seen[2].auth).toBe('Bearer acc-2')                       // retry uses the new token
+})
+
+test('a 2xx response triggers no refresh', async () => {
+  const seen: string[] = []
+  const fetcher = (async (url: string) => { seen.push(url); return resp(200, { projects: [] }) }) as any
+  const api = new FirthApi('http://cp', 'acc-1', fetcher, { refreshToken: 'ref-1' })
+  await api.listProjects()
+  expect(seen).toEqual(['http://cp/projects'])                    // no /auth/refresh
+})
+
+test('refresh failure surfaces a session-expired error, no retry loop', async () => {
+  const queue = [resp(401, { error: 'unauthorized' }), resp(401, { error: 'invalid refresh token' })]
+  const fetcher = (async () => queue.shift() ?? resp(500, {})) as any
+  const api = new FirthApi('http://cp', 'acc-1', fetcher, { refreshToken: 'ref-1' })
+  await expect(api.listProjects()).rejects.toThrow(/firth login/)
+})
