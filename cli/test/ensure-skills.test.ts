@@ -18,14 +18,15 @@ test('ensureSkills installs the three skills once for a linked project and marks
   await ensureSkills({ print: (s) => out.push(s), cwd: dir, run })
   expect(calls.map((c) => c.cmd)).toEqual(['npx', 'npx', 'npx'])
   expect(calls.map((c) => c.args.join(' '))).toEqual([
-    'skills add neondatabase/agent-skills -s neon-postgres -a claude-code -y --copy',
-    'skills add tigrisdata/skills -s tigris-object-operations -s file-storage -s tigris-sdk-guide -s tigris-security-access-control -s tigris-image-optimization -s tigris-s3-migration -s tigris-static-assets -s tigris-agent-kit -a claude-code -y --copy',
-    'skills add firthstack/firth -s firth -a claude-code -y --copy',
+    'skills add neondatabase/agent-skills -s neon-postgres -a claude-code -a codex -y --copy',
+    'skills add tigrisdata/skills -s tigris-object-operations -s file-storage -s tigris-sdk-guide -s tigris-security-access-control -s tigris-image-optimization -s tigris-s3-migration -s tigris-static-assets -s tigris-agent-kit -a claude-code -a codex -y --copy',
+    'skills add firthstack/firth -s firth -a claude-code -a codex -y --copy',
   ])
-  // non-interactive: every invocation pins the agent + skip-prompt flags
+  // non-interactive: every invocation pins the agents (claude-code + codex) + skip-prompt flags
   for (const c of calls) {
     expect(c.args).toContain('-y')
     expect(c.args.join(' ')).toMatch(/-a claude-code/)
+    expect(c.args.join(' ')).toMatch(/-a codex/)
   }
   expect(readProjectLink(dir)?.skillsInstalled).toBe(true)
   expect(out.join('\n')).toMatch(/neon-postgres ✓/)

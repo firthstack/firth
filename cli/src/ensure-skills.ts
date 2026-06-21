@@ -9,11 +9,12 @@ type SkillsDeps = { print: (s: string) => void; cwd: string; run?: Runner }
 
 // Agent skills installed once per linked project so the developer's agent has
 // Neon / Tigris / Firth context. Run via `npx skills add` (vercel-labs/skills),
-// fully non-interactively: `-a claude-code` (one agent → a single `.claude/skills/`
-// dir, no agent prompt; without it the tool fans out to ~13–72 agent dirs),
-// explicit `-s` skill names (no skill prompt), `-y` (no scope/confirm prompt),
-// `--copy` (real files, not symlinks into a transient package cache).
-const AGENT_FLAGS = ['-a', 'claude-code', '-y', '--copy']
+// fully non-interactively: pin the agents (Claude Code → `.claude/skills/`, Codex
+// → `.agents/skills/`; both already gitignored) so there's no agent prompt and the
+// tool doesn't fan out to ~13–72 agent dirs; explicit `-s` skill names (no skill
+// prompt); `-y` (no scope/confirm prompt); `--copy` (real files, not symlinks into
+// a transient package cache).
+const AGENT_FLAGS = ['-a', 'claude-code', '-a', 'codex', '-y', '--copy']
 const SKILLS: Array<{ label: string; args: string[] }> = [
   { label: 'neon-postgres', args: ['skills', 'add', 'neondatabase/agent-skills', '-s', 'neon-postgres', ...AGENT_FLAGS] },
   { label: 'tigris', args: ['skills', 'add', 'tigrisdata/skills',
