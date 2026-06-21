@@ -13,6 +13,7 @@ import { events } from './commands/events.js'
 import { observeSync } from './commands/observe.js'
 import { status } from './commands/status.js'
 import { defaultRunner, type Runner } from './fly.js'
+import { defaultBuildRunner, type BuildRunner } from './flyctl-build.js'
 
 export type CliDeps = {
   print: (s: string) => void
@@ -20,6 +21,7 @@ export type CliDeps = {
   cwd: string
   env: NodeJS.ProcessEnv
   run?: Runner
+  buildRunner?: BuildRunner
 }
 
 function readVersion(): string {
@@ -41,7 +43,7 @@ Commands:
   branch list               List the linked project's branches
   secrets                   Fetch the linked project's secrets into .env (--branch <id>)
   skills pull               Install the firth skill into ./.claude/skills
-  deploy                    Deploy --image <url> to the project's compute (--from, --port)
+  deploy <dir>|--image <url> Deploy from a source dir (Dockerfile) or a pre-built image (--from, --port)
   events                    Show the project's action↔side-effect timeline (--branch, --limit)
   observe sync              Upload local observe-hook findings (.firth/audit.jsonl) to the timeline
   status                    Show login, linked project, and current branch
@@ -99,7 +101,7 @@ export async function route(argv: string[], deps: CliDeps): Promise<number> {
 export async function main(): Promise<void> {
   const code = await route(process.argv.slice(2), {
     print: (s) => console.log(s), home: homedir(), cwd: process.cwd(), env: process.env,
-    run: defaultRunner,
+    run: defaultRunner, buildRunner: defaultBuildRunner,
   })
   process.exit(code)
 }

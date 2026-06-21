@@ -25,4 +25,5 @@ export type DeployResult = { machineId: string; url: string }
 
 export interface ComputeAdapter extends ProviderAdapter {
   deploy(handle: ResourceHandle, opts: DeployOpts): Promise<DeployResult>
+  mintDeployToken(handle: ResourceHandle, opts: { expirySeconds: number }): Promise<{ token: string; expirySeconds: number }>
 }

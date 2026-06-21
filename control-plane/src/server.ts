@@ -150,6 +150,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.send(out)
   })
 
+  app.post('/projects/:id/deploy-token', async (req, reply) => {
+    const { uid, token, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const body = (req.body as any) ?? {}
+    const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
+    const out = await new DeployService(db, deps.cfg, adapters).mintDeployToken(uid, projectId, { from: body.from ?? body.branch })
+    return reply.send(out)
+  })
+
   app.post('/projects/:id/events', async (req, reply) => {
     const { uid, db } = await auth(req)
     const projectId = (req.params as any).id

@@ -38,6 +38,9 @@ export class FirthApi {
   deploy(projectId: string, opts: { image: string; from?: string; port?: number; branch?: string }) {
     return this.req('POST', `/projects/${projectId}/deploy`, opts)
   }
+  mintDeployToken(projectId: string, opts: { from?: string; branch?: string }): Promise<{ token: string; expirySeconds: number; flyApp: string }> {
+    return this.req('POST', `/projects/${projectId}/deploy-token`, opts)
+  }
   listEvents(projectId: string, opts: { branch?: string; limit?: number } = {}) {
     const qs = new URLSearchParams()
     if (opts.branch) qs.set('branch', opts.branch)

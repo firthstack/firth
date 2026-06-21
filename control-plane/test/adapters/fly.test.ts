@@ -193,3 +193,28 @@ describe('FlyAdapter.deploy', () => {
     expect(calls.some((c) => c.init.method === 'DELETE')).toBe(false)
   })
 })
+
+test('mintDeployToken requests an app-scoped deploy token via GraphQL and returns it', async () => {
+  let captured: any
+  const http: HttpClient = async (url, init) => {
+    captured = { url, body: JSON.parse(init.body as string) }
+    return { status: 200, json: async () => ({ data: { createLimitedAccessToken: { token: 'FlyV1 deploy-abc' } } }), text: async () => '' }
+  }
+  const fly = new FlyAdapter('org-token', 'my-org', http)
+  const out = await fly.mintDeployToken({ kind: 'fly', providerRef: { flyApp: 'firth-x-ab12', orgSlug: 'my-org' } }, { expirySeconds: 1200 })
+  expect(out).toEqual({ token: 'FlyV1 deploy-abc', expirySeconds: 1200 })
+  expect(captured.url).toMatch(/graphql/)
+  expect(captured.body.query).toMatch(/createLimitedAccessToken/)
+  // app-scoped + deploy profile (exact input fields are [VERIFY-LIVE], so assert on the variables blob loosely)
+  const vars = JSON.stringify(captured.body.variables)
+  expect(vars).toMatch(/firth-x-ab12/)
+  expect(vars).toMatch(/deploy/)
+})
+
+test('mintDeployToken throws when Fly returns no token', async () => {
+  const http: HttpClient = async () => ({ status: 200, json: async () => ({ data: { createLimitedAccessToken: {} } }), text: async () => '' })
+  const fly = new FlyAdapter('t', 'o', http)
+  await expect(
+    fly.mintDeployToken({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { expirySeconds: 600 }),
+  ).rejects.toThrow()
+})
