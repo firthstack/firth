@@ -173,6 +173,16 @@ describe('FlyAdapter.deploy', () => {
     expect(deletes.map((c) => c.url.match(/machines\/(m-old\d)/)![1]).sort()).toEqual(['m-old1', 'm-old2'])
   })
 
+  test('throws and destroys nothing if machine create returns no id', async () => {
+    const { http, calls } = fakeHttp([
+      { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: {} }, // 200 but no id
+    ])
+    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    await expect(adapter.deploy({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { image: 'img', env: {} }))
+      .rejects.toThrow(/no id/)
+    expect(calls.some((c) => c.init.method === 'DELETE' || c.init.method === 'GET')).toBe(false) // replace loop never ran
+  })
+
   test('deploy destroys nothing when only the new machine exists', async () => {
     const { http, calls } = fakeHttp([
       { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-new' } },
