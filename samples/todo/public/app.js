@@ -1,23 +1,31 @@
-const listEl = document.getElementById('list')
-const countEl = document.getElementById('count')
-const errorEl = document.getElementById('error')
-const form = document.getElementById('new-form')
-const input = document.getElementById('new-input')
-const clearBtn = document.getElementById('clear-completed')
-const filterBtns = [...document.querySelectorAll('.filters button')]
+const $ = (id) => document.getElementById(id)
+const errorEl = $('error')
+const authView = $('auth-view'), todoView = $('todo-view')
+const authForm = $('auth-form'), authEmail = $('auth-email'), authPassword = $('auth-password')
+const authSubmit = $('auth-submit'), authToggle = $('auth-toggle'), authModeLabel = $('auth-mode-label')
+const whoEl = $('who'), logoutBtn = $('logout')
+const listEl = $('list'), countEl = $('count'), form = $('new-form'), input = $('new-input')
+const clearBtn = $('clear-completed'), filterBtns = [...document.querySelectorAll('.filters button')]
 
 let todos = []
 let filter = 'all'
+let mode = 'login'
+let token = localStorage.getItem('todo_token')
 
-const showError = (msg) => { errorEl.textContent = msg; errorEl.hidden = false }
+const showError = (m) => { errorEl.textContent = m; errorEl.hidden = false }
 const clearError = () => { errorEl.hidden = true }
 
 async function api(method, pathName, body) {
-  const res = await fetch(pathName, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  })
+  const headers = {}
+  if (body) headers['Content-Type'] = 'application/json'
+  if (token) headers.Authorization = `Bearer ${token}`
+  const res = await fetch(pathName, { method, headers, body: body ? JSON.stringify(body) : undefined })
+  if (res.status === 401) {
+    token = null
+    localStorage.removeItem('todo_token')
+    showAuth()
+    throw new Error('Please log in')
+  }
   if (!res.ok) {
     let msg = `Request failed (${res.status})`
     try { const j = await res.json(); if (j.error) msg = j.error } catch { /* ignore */ }
@@ -26,6 +34,44 @@ async function api(method, pathName, body) {
   return res.status === 204 ? null : res.json()
 }
 
+function showAuth() { authView.hidden = false; todoView.hidden = true }
+function showTodos(email) { authView.hidden = true; todoView.hidden = false; whoEl.textContent = email }
+
+// --- auth ---
+authToggle.addEventListener('click', (e) => {
+  e.preventDefault()
+  mode = mode === 'login' ? 'register' : 'login'
+  authSubmit.textContent = mode === 'login' ? 'Log in' : 'Register'
+  authModeLabel.textContent = mode === 'login' ? 'No account?' : 'Have an account?'
+  authToggle.textContent = mode === 'login' ? 'Register' : 'Log in'
+  clearError()
+})
+
+authForm.addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const email = authEmail.value.trim()
+  const password = authPassword.value
+  if (!email || !password) return
+  try {
+    const out = await api('POST', `/api/auth/${mode}`, { email, password })
+    token = out.token
+    localStorage.setItem('todo_token', token)
+    authPassword.value = ''
+    clearError()
+    showTodos(out.user.email)
+    await load()
+  } catch (err) { showError(err.message) }
+})
+
+logoutBtn.addEventListener('click', async () => {
+  try { await api('POST', '/api/auth/logout') } catch { /* ignore */ }
+  token = null
+  localStorage.removeItem('todo_token')
+  todos = []
+  showAuth()
+})
+
+// --- todos ---
 function visible() {
   if (filter === 'active') return todos.filter((t) => !t.completed)
   if (filter === 'completed') return todos.filter((t) => t.completed)
@@ -122,7 +168,17 @@ clearBtn.addEventListener('click', async () => {
 for (const b of filterBtns) b.addEventListener('click', () => { filter = b.dataset.filter; render() })
 errorEl.addEventListener('click', clearError)
 
-;(async () => {
+async function load() {
   try { todos = await api('GET', '/api/todos'); clearError(); render() }
-  catch (e) { showError(e.message) }
+  catch (e) { if (token) showError(e.message) } // a 401 already cleared the token + showed auth
+}
+
+// --- bootstrap: validate any stored token, else show the auth view ---
+;(async () => {
+  if (!token) { showAuth(); return }
+  try {
+    const me = await api('GET', '/api/auth/me')
+    showTodos(me.email)
+    await load()
+  } catch { /* 401 already cleared token + showed auth */ }
 })()

@@ -1,11 +1,13 @@
 import { test, before, after, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  makePool, listTodos, createTodo, updateTodo, deleteTodo, clearCompleted, ValidationError,
+  makePool, listTodos, createTodo, updateTodo, deleteTodo, clearCompleted,
+  createUser, findUserByEmail, createSession, findUserBySessionToken, deleteSession,
+  ValidationError, EmailTakenError,
 } from '../db.js'
 
 const MISSING_ID = '00000000-0000-0000-0000-000000000000'
-let pool, client
+let pool, client, userA, userB
 
 before(() => {
   assert.ok(process.env.DATABASE_URL, 'DATABASE_URL must be set — run `firth secrets` first')
@@ -13,78 +15,104 @@ before(() => {
 })
 after(async () => { await pool.end() })
 
-// Isolate every test inside a transaction we roll back — no data persists. The DELETE gives each
-// test a clean slate even when the live table already holds real rows; the rollback restores them.
+// Clean slate within a rolled-back transaction; deleting users cascades to their todos + sessions.
 beforeEach(async () => {
   client = await pool.connect()
   await client.query('begin')
-  await client.query('delete from todos')
+  await client.query('delete from users')
+  userA = await createUser(client, 'a@example.com', 'password-a')
+  userB = await createUser(client, 'b@example.com', 'password-b')
 })
 afterEach(async () => { await client.query('rollback'); client.release() })
 
-test('createTodo inserts and returns the row', async () => {
-  const t = await createTodo(client, 'buy milk')
-  assert.equal(t.title, 'buy milk')
-  assert.equal(t.completed, false)
-  assert.ok(t.id)
+// --- users ---
+test('createUser returns id + email and lowercases the email', async () => {
+  const u = await createUser(client, 'Mixed@Case.COM', 'password1')
+  assert.equal(u.email, 'mixed@case.com')
+  assert.ok(u.id)
 })
 
-test('createTodo trims whitespace', async () => {
-  const t = await createTodo(client, '  spaced  ')
-  assert.equal(t.title, 'spaced')
+test('createUser rejects a duplicate email', async () => {
+  await assert.rejects(() => createUser(client, 'a@example.com', 'password1'), EmailTakenError)
 })
 
-test('createTodo rejects an empty title', async () => {
-  await assert.rejects(() => createTodo(client, '   '), ValidationError)
+test('createUser rejects a bad email or short password', async () => {
+  await assert.rejects(() => createUser(client, 'notanemail', 'password1'), ValidationError)
+  await assert.rejects(() => createUser(client, 'c@example.com', 'short'), ValidationError)
 })
 
-test('createTodo rejects a title over 500 chars', async () => {
-  await assert.rejects(() => createTodo(client, 'x'.repeat(501)), ValidationError)
+test('findUserByEmail normalizes case and returns the hash', async () => {
+  const u = await findUserByEmail(client, 'A@EXAMPLE.COM')
+  assert.equal(u.id, userA.id)
+  assert.ok(u.password_hash)
 })
 
-test('listTodos returns rows ordered by created_at', async () => {
-  await createTodo(client, 'first')
-  await createTodo(client, 'second')
-  const rows = await listTodos(client)
-  assert.deepEqual(rows.map((r) => r.title), ['first', 'second'])
+test('findUserByEmail returns null for an unknown email', async () => {
+  assert.equal(await findUserByEmail(client, 'nobody@example.com'), null)
 })
 
-test('updateTodo toggles completed', async () => {
-  const t = await createTodo(client, 'task')
-  const u = await updateTodo(client, t.id, { completed: true })
-  assert.equal(u.completed, true)
+// --- sessions ---
+test('createSession → findUserBySessionToken → deleteSession', async () => {
+  const token = await createSession(client, userA.id)
+  const u = await findUserBySessionToken(client, token)
+  assert.equal(u.id, userA.id)
+  await deleteSession(client, token)
+  assert.equal(await findUserBySessionToken(client, token), null)
 })
 
-test('updateTodo changes the title', async () => {
-  const t = await createTodo(client, 'old')
-  const u = await updateTodo(client, t.id, { title: 'new' })
-  assert.equal(u.title, 'new')
+test('findUserBySessionToken returns null for an unknown or empty token', async () => {
+  assert.equal(await findUserBySessionToken(client, 'bogus'), null)
+  assert.equal(await findUserBySessionToken(client, ''), null)
 })
 
-test('updateTodo rejects an empty title', async () => {
-  const t = await createTodo(client, 'keep')
-  await assert.rejects(() => updateTodo(client, t.id, { title: '  ' }), ValidationError)
+test('findUserBySessionToken returns null for an expired session', async () => {
+  const token = await createSession(client, userA.id, -1) // already expired
+  assert.equal(await findUserBySessionToken(client, token), null)
 })
 
-test('updateTodo returns null for an unknown id', async () => {
-  const u = await updateTodo(client, MISSING_ID, { completed: true })
-  assert.equal(u, null)
+// --- todos: ownership ---
+test('createTodo inserts under the owner; listTodos returns only that owner', async () => {
+  await createTodo(client, userA.id, 'a-todo')
+  await createTodo(client, userB.id, 'b-todo')
+  assert.deepEqual((await listTodos(client, userA.id)).map((r) => r.title), ['a-todo'])
+  assert.deepEqual((await listTodos(client, userB.id)).map((r) => r.title), ['b-todo'])
 })
 
-test('deleteTodo removes the row', async () => {
-  const t = await createTodo(client, 'gone')
-  assert.equal(await deleteTodo(client, t.id), true)
-  assert.equal((await listTodos(client)).length, 0)
+test('createTodo trims and rejects empty / over-long titles', async () => {
+  assert.equal((await createTodo(client, userA.id, '  spaced  ')).title, 'spaced')
+  await assert.rejects(() => createTodo(client, userA.id, '   '), ValidationError)
+  await assert.rejects(() => createTodo(client, userA.id, 'x'.repeat(501)), ValidationError)
 })
 
-test('deleteTodo returns false for an unknown id', async () => {
-  assert.equal(await deleteTodo(client, MISSING_ID), false)
+test('updateTodo edits / toggles the owner\'s todo', async () => {
+  const t = await createTodo(client, userA.id, 'task')
+  assert.equal((await updateTodo(client, userA.id, t.id, { completed: true })).completed, true)
+  assert.equal((await updateTodo(client, userA.id, t.id, { title: 'renamed' })).title, 'renamed')
 })
 
-test('clearCompleted deletes only completed rows', async () => {
-  const a = await createTodo(client, 'a')
-  await createTodo(client, 'b')
-  await updateTodo(client, a.id, { completed: true })
-  assert.equal(await clearCompleted(client), 1)
-  assert.deepEqual((await listTodos(client)).map((r) => r.title), ['b'])
+// --- todos: isolation (the core multi-tenant requirement) ---
+test('updateTodo returns null for another user\'s todo and leaves it unchanged', async () => {
+  const t = await createTodo(client, userB.id, 'b-secret')
+  assert.equal(await updateTodo(client, userA.id, t.id, { completed: true }), null)
+  assert.equal((await listTodos(client, userB.id))[0].completed, false)
+})
+
+test('deleteTodo returns false for another user\'s todo and leaves it intact', async () => {
+  const t = await createTodo(client, userB.id, 'b-secret')
+  assert.equal(await deleteTodo(client, userA.id, t.id), false)
+  assert.equal((await listTodos(client, userB.id)).length, 1)
+})
+
+test('updateTodo / deleteTodo return null/false for a missing id', async () => {
+  assert.equal(await updateTodo(client, userA.id, MISSING_ID, { completed: true }), null)
+  assert.equal(await deleteTodo(client, userA.id, MISSING_ID), false)
+})
+
+test('clearCompleted clears only the caller\'s completed todos', async () => {
+  const a1 = await createTodo(client, userA.id, 'a-done')
+  await updateTodo(client, userA.id, a1.id, { completed: true })
+  const b1 = await createTodo(client, userB.id, 'b-done')
+  await updateTodo(client, userB.id, b1.id, { completed: true })
+  assert.equal(await clearCompleted(client, userA.id), 1)
+  assert.equal((await listTodos(client, userB.id)).length, 1) // B untouched
 })

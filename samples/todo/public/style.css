@@ -45,3 +45,10 @@ h1 { font-size: 28px; margin: 0 0 16px; }
 .filters button.active { border-color: var(--accent); color: var(--accent); }
 .clear { background: none; color: var(--muted); padding: 4px 8px; }
 .clear:hover { color: var(--danger); }
+.topbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.who { flex: 1; color: var(--muted); font-size: 14px; }
+.link-btn { background: none; border: none; color: var(--muted); cursor: pointer; padding: 4px 8px; font-size: 14px; }
+.link-btn:hover { color: var(--danger); }
+.auth-toggle { color: var(--muted); font-size: 14px; margin: 8px 2px 0; }
+.auth-toggle a { color: var(--accent); }
+#auth-password { font-family: inherit; }

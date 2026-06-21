@@ -10,20 +10,39 @@
   <main class="app">
     <h1>Todo</h1>
     <div id="error" class="error" role="alert" hidden title="Click to dismiss"></div>
-    <form id="new-form" class="new">
-      <input id="new-input" type="text" placeholder="What needs doing?" autocomplete="off" maxlength="500" />
-      <button type="submit">Add</button>
-    </form>
-    <ul id="list" class="list"></ul>
-    <footer class="footer">
-      <span id="count" class="count"></span>
-      <div class="filters">
-        <button type="button" data-filter="all" class="active">All</button>
-        <button type="button" data-filter="active">Active</button>
-        <button type="button" data-filter="completed">Completed</button>
+
+    <section id="auth-view" hidden>
+      <form id="auth-form" class="new">
+        <input id="auth-email" type="email" placeholder="email" autocomplete="username" />
+        <input id="auth-password" type="password" placeholder="password (8+ chars)" autocomplete="current-password" />
+        <button type="submit" id="auth-submit">Log in</button>
+      </form>
+      <p class="auth-toggle">
+        <span id="auth-mode-label">No account?</span>
+        <a href="#" id="auth-toggle">Register</a>
+      </p>
+    </section>
+
+    <section id="todo-view" hidden>
+      <div class="topbar">
+        <span id="who" class="who"></span>
+        <button type="button" id="logout" class="link-btn">Log out</button>
       </div>
-      <button type="button" id="clear-completed" class="clear">Clear completed</button>
-    </footer>
+      <form id="new-form" class="new">
+        <input id="new-input" type="text" placeholder="What needs doing?" autocomplete="off" maxlength="500" />
+        <button type="submit">Add</button>
+      </form>
+      <ul id="list" class="list"></ul>
+      <footer class="footer">
+        <span id="count" class="count"></span>
+        <div class="filters">
+          <button type="button" data-filter="all" class="active">All</button>
+          <button type="button" data-filter="active">Active</button>
+          <button type="button" data-filter="completed">Completed</button>
+        </div>
+        <button type="button" id="clear-completed" class="link-btn">Clear completed</button>
+      </footer>
+    </section>
   </main>
   <script src="/app.js" type="module"></script>
 </body>
