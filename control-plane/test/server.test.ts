@@ -597,3 +597,48 @@ test('DELETE /projects/:id with policy=deny → 403, not torn down', async () =>
   expect(r.statusCode).toBe(403)
   expect(destroyed).toBe(false)
 })
+
+test('approvals: list pending, approve flips to granted', async () => {
+  const db = fakeData()
+  db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'p1', action: 'project.delete', status: 'pending', requested_at: 'now', decided_at: null })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const list = await app.inject({ method: 'GET', url: '/projects/p1/approvals?status=pending', headers: { authorization: 'Bearer good' } })
+  expect(list.json().approvals.map((a: any) => a.id)).toEqual(['a1'])
+  const ap = await app.inject({ method: 'POST', url: '/projects/p1/approvals/a1/approve', headers: { authorization: 'Bearer good' } })
+  expect(ap.statusCode).toBe(200)
+  expect(db.tables.approvals[0].status).toBe('granted')
+})
+
+test('approvals: deny flips to denied + emits govern.denied', async () => {
+  const db = fakeData()
+  db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'p1', action: 'project.delete', status: 'pending', requested_at: 'now', decided_at: null })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/approvals/a1/deny', headers: { authorization: 'Bearer good' } })
+  expect(r.statusCode).toBe(200)
+  expect(db.tables.approvals[0].status).toBe('denied')
+  expect(db.tables.events.map((e: any) => e.kind)).toContain('govern.denied')
+})
+
+test('approve a missing approval → 404', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/approvals/nope/approve', headers: { authorization: 'Bearer good' } })
+  expect(r.statusCode).toBe(404)
+})
+
+test('policy: get defaults, set an override', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const p0 = await app.inject({ method: 'GET', url: '/projects/p1/policy', headers: { authorization: 'Bearer good' } })
+  expect(p0.json().policy['project.delete']).toBe('approve')
+  const set = await app.inject({ method: 'PUT', url: '/projects/p1/policy/deploy', headers: { authorization: 'Bearer good' }, payload: { decision: 'approve' } })
+  expect(set.statusCode).toBe(200)
+  expect(set.json().policy.deploy).toBe('approve')
+})
+
+test('policy: unknown action → 400', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const r = await app.inject({ method: 'PUT', url: '/projects/p1/policy/bogus', headers: { authorization: 'Bearer good' }, payload: { decision: 'deny' } })
+  expect(r.statusCode).toBe(400)
+})

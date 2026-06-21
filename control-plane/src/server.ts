@@ -4,7 +4,7 @@ import type { FirthConfig } from './config.js'
 import { resolveUid, UnauthorizedError, NotFoundError, ConflictError, ForbiddenError } from './auth.js'
 import type { DataClient } from './db/types.js'
 import { ProjectsRepo, SecretsRepo, BranchesRepo, ResourcesRepo, EventsRepo } from './db/repos.js'
-import { GovernService, type GatedAction } from './services/govern.js'
+import { GovernService, isGatedAction, type GatedAction } from './services/govern.js'
 import { decryptSecret } from './crypto/secrets.js'
 import { ProvisioningService } from './services/provisioning.js'
 import { BranchService } from './services/branches.js'
@@ -207,6 +207,46 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       branch: q.branch, limit: q.limit ? Number(q.limit) : undefined,
     })
     return reply.send({ events })
+  })
+
+  app.get('/projects/:id/approvals', async (req, reply) => {
+    const { uid, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const status = (req.query as any).status
+    const approvals = await new GovernService(db).listApprovals(uid, projectId, status)
+    return reply.send({ approvals })
+  })
+
+  app.post('/projects/:id/approvals/:aid/approve', async (req, reply) => {
+    const { uid, db } = await auth(req)
+    const approval = await new GovernService(db).decide(uid, (req.params as any).id, (req.params as any).aid, 'granted')
+    return reply.send({ approval })
+  })
+
+  app.post('/projects/:id/approvals/:aid/deny', async (req, reply) => {
+    const { uid, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const approval = await new GovernService(db).decide(uid, projectId, (req.params as any).aid, 'denied')
+    await emit(db, uid, projectId, null, 'govern.denied', { action: approval.action, approvalId: approval.id })
+    return reply.send({ approval })
+  })
+
+  app.get('/projects/:id/policy', async (req, reply) => {
+    const { uid, db } = await auth(req)
+    const policy = await new GovernService(db).effectivePolicy(uid, (req.params as any).id)
+    return reply.send({ policy })
+  })
+
+  app.put('/projects/:id/policy/:action', async (req, reply) => {
+    const { uid, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const action = (req.params as any).action
+    const { decision } = (req.body as any) ?? {}
+    if (!isGatedAction(action)) return reply.code(400).send({ error: 'unknown action' })
+    if (decision !== 'allow' && decision !== 'deny' && decision !== 'approve') return reply.code(400).send({ error: 'decision must be allow|deny|approve' })
+    const svc = new GovernService(db)
+    await svc.setRule(uid, projectId, action, decision)
+    return reply.send({ policy: await svc.effectivePolicy(uid, projectId) })
   })
 
   // ---------- Auth proxy routes (unauthenticated — how you obtain a token) ----------
