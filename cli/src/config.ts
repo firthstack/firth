@@ -2,7 +2,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 
-export type CliConfig = { apiUrl: string; token?: string }
+export type CliConfig = { apiUrl: string; token?: string; refreshToken?: string }
 
 // Production control plane (InsForge compute). Override with `firth login --api-url`
 // or FIRTH_API_URL=… for local dev against http://localhost:8080.

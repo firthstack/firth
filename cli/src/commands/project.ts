@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util'
-import { readConfig, writeProjectLink, readProjectLink, clearProjectLink, setCurrentBranch } from '../config.js'
+import { readConfig, writeConfig, writeProjectLink, readProjectLink, clearProjectLink, setCurrentBranch } from '../config.js'
 import { FirthApi } from '../api.js'
 import type { CliDeps } from '../index.js'
 import { formatTeardown } from './util.js'
@@ -11,7 +11,10 @@ export function apiFromDeps(deps: CliDeps & { makeApi?: () => FirthApi }): Firth
   if (deps.makeApi) return deps.makeApi()
   const cfg = readConfig(deps.home, deps.env)
   if (!cfg.token) throw new Error('not logged in — run `firth login`')
-  return new FirthApi(cfg.apiUrl, cfg.token)
+  return new FirthApi(cfg.apiUrl, cfg.token, undefined, {
+    refreshToken: cfg.refreshToken,
+    onTokens: ({ token, refreshToken }) => writeConfig({ ...cfg, token, refreshToken }, deps.home),
+  })
 }
 
 export async function projectCreate(argv: string[], deps: CliDeps & { makeApi?: () => FirthApi }): Promise<number> {

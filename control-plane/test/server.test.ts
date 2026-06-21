@@ -391,7 +391,11 @@ it('sends an Access-Control-Allow-Origin header for the Vite dev origin', async 
 const fakeAuthProxy = {
   async login(email: string, _password: string) {
     if (email === 'fail@x.co') throw new Error('email not verified')
-    return { token: 'tok-1', user: { id: 'u1', email: 'a@b.co' } }
+    return { token: 'tok-1', refreshToken: 'ref-1', user: { id: 'u1', email: 'a@b.co' } }
+  },
+  async refresh(refreshToken: string) {
+    if (refreshToken !== 'good-refresh') throw new Error('invalid')
+    return { token: 'tok-2', refreshToken: 'ref-2' }
   },
   async signUp(_email: string, _password: string) {
     return { needsVerification: true, token: null, user: null }
@@ -407,7 +411,7 @@ test('POST /auth/login returns token + user on success', async () => {
   const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
   const r = await app.inject({ method: 'POST', url: '/auth/login', payload: { email: 'a@b.co', password: 'pw' } })
   expect(r.statusCode).toBe(200)
-  expect(r.json()).toEqual({ token: 'tok-1', user: { id: 'u1', email: 'a@b.co' } })
+  expect(r.json()).toEqual({ token: 'tok-1', refreshToken: 'ref-1', user: { id: 'u1', email: 'a@b.co' } })
 })
 
 test('POST /auth/login missing password → 400', async () => {
@@ -516,4 +520,30 @@ test('POST /projects/:id/deploy-token requires auth', async () => {
   const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => db as any })
   const r = await app.inject({ method: 'POST', url: '/projects/p1/deploy-token', payload: {} })
   expect(r.statusCode).toBe(401)
+})
+
+test('POST /auth/login includes the refresh token', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/login', payload: { email: 'a@b.co', password: 'pw' } })
+  expect(r.json()).toEqual({ token: 'tok-1', refreshToken: 'ref-1', user: { id: 'u1', email: 'a@b.co' } })
+})
+
+test('POST /auth/refresh rotates the pair (no bearer required)', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/refresh', payload: { refreshToken: 'good-refresh' } })
+  expect(r.statusCode).toBe(200)
+  expect(r.json()).toEqual({ token: 'tok-2', refreshToken: 'ref-2' })
+})
+
+test('POST /auth/refresh 400 when refreshToken missing', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/refresh', payload: {} })
+  expect(r.statusCode).toBe(400)
+})
+
+test('POST /auth/refresh 401 with a static message on an invalid token', async () => {
+  const app = buildServer({ cfg, verifyToken: async () => null, dataForToken: () => fakeData() as any, authProxy: fakeAuthProxy })
+  const r = await app.inject({ method: 'POST', url: '/auth/refresh', payload: { refreshToken: 'nope' } })
+  expect(r.statusCode).toBe(401)
+  expect(r.json()).toEqual({ error: 'invalid refresh token' })
 })

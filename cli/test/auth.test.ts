@@ -77,3 +77,13 @@ test('logout clears the token', async () => {
   await logout([], d as any)
   expect(readConfig(home, {}).token).toBeUndefined()
 })
+
+test('login persists both the access and refresh tokens', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-'))
+  const api = { login: async () => ({ token: 'acc-1', refreshToken: 'ref-1', user: { id: 'u1', email: 'a@b.co' } }) }
+  const d = { print: () => {}, home: dir, cwd: dir, env: {}, makeApi: () => api }
+  expect(await login(['--email', 'a@b.co', '--password', 'pw'], d as any)).toBe(0)
+  const cfg = readConfig(dir, {})
+  expect(cfg.token).toBe('acc-1')
+  expect(cfg.refreshToken).toBe('ref-1')
+})

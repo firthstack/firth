@@ -10,6 +10,7 @@ export class ApiError extends Error {
 export type Fetcher = typeof fetch
 
 export class Api {
+  private refreshing: Promise<boolean> | null = null
   constructor(
     private baseUrl: string,
     private getToken: () => string | null,
@@ -17,25 +18,49 @@ export class Api {
     // `= fetch` stored on `this.fetcher` and called as `this.fetcher(...)` runs fetch
     // with `this` = the Api instance, which browsers reject ("Illegal invocation").
     private fetcher: Fetcher = (...args: Parameters<typeof fetch>) => fetch(...args),
+    private opts: {
+      getRefreshToken?: () => string | null
+      onTokens?: (t: { token: string; refreshToken: string }) => void
+      onAuthLost?: () => void
+    } = {},
   ) {}
 
-  private async req(method: string, path: string, body?: unknown): Promise<any> {
+  private send(method: string, path: string, body?: unknown) {
     const token = this.getToken()
-    const res = await this.fetcher(`${this.baseUrl}${path}`, {
+    return this.fetcher(`${this.baseUrl}${path}`, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
+  }
+
+  // Single-flight: concurrent 401s share one refresh (rotation makes parallel refreshes
+  // invalidate each other). Resolves true once the token is rotated + persisted.
+  private refreshOnce(): Promise<boolean> {
+    if (!this.refreshing) this.refreshing = this.doRefresh().finally(() => { this.refreshing = null })
+    return this.refreshing
+  }
+
+  private async doRefresh(): Promise<boolean> {
+    const refreshToken = this.opts.getRefreshToken?.()
+    if (!refreshToken) return false
+    const res = await this.fetcher(`${this.baseUrl}/auth/refresh`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken }),
+    })
+    if (!res.ok) { this.opts.onAuthLost?.(); return false }
+    const data = await res.json()
+    this.opts.onTokens?.({ token: data.token, refreshToken: data.refreshToken })
+    return true
+  }
+
+  private async req(method: string, path: string, body?: unknown): Promise<any> {
+    let res = await this.send(method, path, body)
+    if (res.status === 401 && this.opts.getRefreshToken?.()) {
+      if (await this.refreshOnce()) res = await this.send(method, path, body)
+    }
     if (!res.ok) {
       let msg = ''
-      try {
-        msg = (await res.json())?.error ?? ''
-      } catch {
-        /* ignore */
-      }
+      try { msg = (await res.json())?.error ?? '' } catch { /* ignore */ }
       throw new ApiError(res.status, msg || `request failed: ${res.status}`)
     }
     return res.json()

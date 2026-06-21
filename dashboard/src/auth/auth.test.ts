@@ -117,4 +117,15 @@ describe('createControlPlaneAuth', () => {
     expect(localStorage.getItem('firth_token')).toBeNull()
     expect(fetcher).not.toHaveBeenCalled()
   })
+
+  it('signIn stores both the access and refresh tokens; signOut clears both', async () => {
+    const fetcher = makeFetcher([{ ok: true, body: { token: 'tok-abc', refreshToken: 'ref-abc', user: { id: 'u1', email: 'a@b.co' } } }])
+    const auth = createControlPlaneAuth(API_URL, fetcher as unknown as typeof fetch)
+    await auth.signIn('a@b.co', 'secret')
+    expect(localStorage.getItem('firth_token')).toBe('tok-abc')
+    expect(localStorage.getItem('firth_refresh_token')).toBe('ref-abc')
+    await auth.signOut()
+    expect(localStorage.getItem('firth_token')).toBeNull()
+    expect(localStorage.getItem('firth_refresh_token')).toBeNull()
+  })
 })

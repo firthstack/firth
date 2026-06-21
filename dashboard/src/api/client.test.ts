@@ -5,6 +5,10 @@ function jsonRes(status: number, body: unknown) {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response
 }
 
+function resp(status: number, body: any) {
+  return { ok: status >= 200 && status < 300, status, json: async () => body } as Response
+}
+
 describe('Api', () => {
   it('listProjects returns the array and sends a Bearer token', async () => {
     const fetcher = vi.fn(async () => jsonRes(200, { projects: [{ id: 'p1', name: 'a', status: 'active' }] }))
@@ -66,5 +70,42 @@ describe('Api', () => {
     expect(secrets).toEqual({ AWS_ACCESS_KEY_ID: 'tid_x' })
     const [url] = fetcher.mock.calls[0] as any
     expect(url).toBe('http://api/projects/p1/secrets')
+  })
+
+  it('refreshes once on 401, persists the pair, retries, and returns the result', async () => {
+    const queue = [resp(401, { error: 'unauthorized' }), resp(200, { token: 't2', refreshToken: 'r2' }), resp(200, { projects: [{ id: 'p1' }] })]
+    const seen: string[] = []
+    const fetcher = ((url: string) => { seen.push(url); return Promise.resolve(queue.shift()!) }) as unknown as typeof fetch
+    let persisted: any
+    let token = 't1'
+    const api = new Api('http://cp', () => token, fetcher, {
+      getRefreshToken: () => 'r1',
+      onTokens: (t) => { persisted = t; token = t.token },
+    })
+    const projects = await api.listProjects()
+    expect(projects).toEqual([{ id: 'p1' }])
+    expect(seen).toEqual(['http://cp/projects', 'http://cp/auth/refresh', 'http://cp/projects'])
+    expect(persisted).toEqual({ token: 't2', refreshToken: 'r2' })
+  })
+
+  it('two concurrent 401s trigger only one refresh (single-flight)', async () => {
+    let refreshCalls = 0
+    let token = 't1'
+    const fetcher = ((url: string) => {
+      if (url.endsWith('/auth/refresh')) { refreshCalls++; return Promise.resolve(resp(200, { token: 't2', refreshToken: 'r2' })) }
+      return Promise.resolve(token === 't1' ? resp(401, {}) : resp(200, { projects: [] }))
+    }) as unknown as typeof fetch
+    const api = new Api('http://cp', () => token, fetcher, { getRefreshToken: () => 'r1', onTokens: (t) => { token = t.token } })
+    await Promise.all([api.listProjects(), api.listProjects()])
+    expect(refreshCalls).toBe(1)
+  })
+
+  it('refresh failure clears tokens and propagates the 401', async () => {
+    const queue = [resp(401, {}), resp(401, { error: 'invalid refresh token' })]
+    const fetcher = (() => Promise.resolve(queue.shift() ?? resp(500, {}))) as unknown as typeof fetch
+    let cleared = false
+    const api = new Api('http://cp', () => 't1', fetcher, { getRefreshToken: () => 'r1', onAuthLost: () => { cleared = true } })
+    await expect(api.listProjects()).rejects.toMatchObject({ status: 401 })
+    expect(cleared).toBe(true)
   })
 })
