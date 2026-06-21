@@ -10,6 +10,10 @@ export class ConflictError extends Error {
   constructor(msg = 'conflict') { super(msg); this.name = 'ConflictError' }
 }
 
+export class ForbiddenError extends Error {
+  constructor(msg = 'forbidden') { super(msg); this.name = 'ForbiddenError' }
+}
+
 export async function resolveUid(
   authHeader: string | undefined,
   verify: (token: string) => Promise<{ id: string } | null>,

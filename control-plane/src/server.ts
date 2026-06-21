@@ -1,7 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
 import type { FirthConfig } from './config.js'
-import { resolveUid, UnauthorizedError, NotFoundError, ConflictError } from './auth.js'
+import { resolveUid, UnauthorizedError, NotFoundError, ConflictError, ForbiddenError } from './auth.js'
 import type { DataClient } from './db/types.js'
 import { ProjectsRepo, SecretsRepo, BranchesRepo, ResourcesRepo, EventsRepo } from './db/repos.js'
 import { decryptSecret } from './crypto/secrets.js'
@@ -29,6 +29,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (err instanceof UnauthorizedError) return reply.code(401).send({ error: 'unauthorized' })
     if (err instanceof NotFoundError) return reply.code(404).send({ error: err.message })
     if (err instanceof ConflictError) return reply.code(409).send({ error: err.message })
+    if (err instanceof ForbiddenError) return reply.code(403).send({ error: err.message })
     return reply.code(500).send({ error: 'internal error' })
   })
 
