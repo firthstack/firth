@@ -18,7 +18,7 @@ const fakeNeon = {
 //   eq(col, null)  → matches nothing (mirrors col=eq.null, not IS NULL)
 //   is(col, null)  → matches rows where col is null/undefined
 function fakeData() {
-  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [], events: [] }
+  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [], events: [], governance_rules: [], approvals: [] }
   return { tables, from(t: string) {
     const filters: Array<(r: any) => boolean> = []
     let mode: 'insert' | 'select' | 'update' = 'select'
@@ -34,6 +34,11 @@ function fakeData() {
       },
       upsert(v: any, opts?: { onConflict?: string; ignoreDuplicates?: boolean }) {
         mode = 'insert'
+        if (opts?.onConflict && !opts?.ignoreDuplicates) {           // merge-on-conflict (governance_rules)
+          const cols = opts.onConflict.split(',')
+          const ex = tables[t].find((r) => cols.every((c) => r[c] === (v as any)[c]))
+          if (ex) { Object.assign(ex, v); insertedRow = ex; return api }
+        }
         const dk = (v as any).dedup_key
         // model UNIQUE(owner, project_id, dedup_key): NULL keys never conflict
         const conflict = opts?.ignoreDuplicates && dk != null && tables[t].some(
@@ -356,6 +361,8 @@ test('DELETE /projects/:id → 200 with teardown summary', async () => {
   const db = fakeData()
   const project = (await db.from('projects').insert({ owner: 'uid-1', name: 'a', status: 'active' }).then((r: any) => r)).data[0]
   await db.from('resources').insert({ owner: 'uid-1', project_id: project.id, kind: 'neon', provider_ref: {}, status: 'active' })
+  // project.delete defaults to 'approve' — seed a granted approval so the gate passes and teardown runs
+  db.tables.approvals.push({ id: 'gr-200', owner: 'uid-1', project_id: project.id, action: 'project.delete', status: 'granted', requested_at: 'now', decided_at: null })
   const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
   const res = await app.inject({ method: 'DELETE', url: `/projects/${project.id}`, headers: { authorization: 'Bearer good' } })
   expect(res.statusCode).toBe(200)
@@ -374,6 +381,8 @@ test('DELETE default branch → 409', async () => {
 
 test('DELETE a missing project → 404', async () => {
   const db = fakeData()
+  // project.delete defaults to 'approve' — seed a granted approval so the gate passes and the real 404 surfaces
+  db.tables.approvals.push({ id: 'gr-404', owner: 'uid-1', project_id: 'nope', action: 'project.delete', status: 'granted', requested_at: 'now', decided_at: null })
   const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fakeNeon as any] })
   const res = await app.inject({ method: 'DELETE', url: '/projects/nope', headers: { authorization: 'Bearer good' } })
   expect(res.statusCode).toBe(404)
@@ -546,4 +555,90 @@ test('POST /auth/refresh 401 with a static message on an invalid token', async (
   const r = await app.inject({ method: 'POST', url: '/auth/refresh', payload: { refreshToken: 'nope' } })
   expect(r.statusCode).toBe(401)
   expect(r.json()).toEqual({ error: 'invalid refresh token' })
+})
+
+// ---- Governance gate tests ----
+
+test('DELETE /projects/:id is gated: default approve → 202 pending, project not torn down', async () => {
+  const db = fakeData()
+  await db.from('projects').insert({ owner: 'uid-1', name: 'gp', status: 'active' })
+  let destroyed = false
+  const fly = { kind: 'fly', branchModel: 'redeploy', async provision() { return { kind: 'fly', providerRef: {} } }, async destroy() { destroyed = true }, async createBranch() { return null }, async deleteBranch() {}, async mintCredentials() { return {} }, async readUsage() { return {} } }
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fly as any] })
+  const r = await app.inject({ method: 'DELETE', url: '/projects/projects-0', headers: { authorization: 'Bearer good' } })
+  expect(r.statusCode).toBe(202)
+  expect(r.json().status).toBe('approval_required')
+  expect(typeof r.json().approvalId).toBe('string')
+  expect(db.tables.approvals.filter((a: any) => a.status === 'pending')).toHaveLength(1)
+  expect(db.tables.events.map((e: any) => e.kind)).toContain('govern.pending')
+  expect(destroyed).toBe(false)
+})
+
+test('DELETE /projects/:id proceeds after the approval is granted (grant consumed)', async () => {
+  const db = fakeData()
+  await db.from('projects').insert({ owner: 'uid-1', name: 'gp', status: 'active' })
+  // Push a granted approval directly (Task 4 approve route not yet implemented)
+  db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'projects-0', action: 'project.delete', status: 'granted', requested_at: 'now', decided_at: null })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [] })
+  const r2 = await app.inject({ method: 'DELETE', url: '/projects/projects-0', headers: { authorization: 'Bearer good' } })
+  expect(r2.statusCode).toBe(200)
+  expect(db.tables.events.map((e: any) => e.kind)).toContain('govern.approved')
+  expect(db.tables.approvals.find((a: any) => a.id === 'a1')?.status).toBe('consumed')
+})
+
+test('DELETE /projects/:id with policy=deny → 403, not torn down', async () => {
+  const db = fakeData()
+  await db.from('projects').insert({ owner: 'uid-1', name: 'gp', status: 'active' })
+  db.tables.governance_rules.push({ id: 'gr1', owner: 'uid-1', project_id: 'projects-0', action: 'project.delete', decision: 'deny' })
+  let destroyed = false
+  const fly = { kind: 'fly', branchModel: 'redeploy', async provision() { return { kind: 'fly', providerRef: {} } }, async destroy() { destroyed = true }, async createBranch() { return null }, async deleteBranch() {}, async mintCredentials() { return {} }, async readUsage() { return {} } }
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fly as any] })
+  const r = await app.inject({ method: 'DELETE', url: '/projects/projects-0', headers: { authorization: 'Bearer good' } })
+  expect(r.statusCode).toBe(403)
+  expect(destroyed).toBe(false)
+})
+
+test('approvals: list pending, approve flips to granted', async () => {
+  const db = fakeData()
+  db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'p1', action: 'project.delete', status: 'pending', requested_at: 'now', decided_at: null })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const list = await app.inject({ method: 'GET', url: '/projects/p1/approvals?status=pending', headers: { authorization: 'Bearer good' } })
+  expect(list.json().approvals.map((a: any) => a.id)).toEqual(['a1'])
+  const ap = await app.inject({ method: 'POST', url: '/projects/p1/approvals/a1/approve', headers: { authorization: 'Bearer good' } })
+  expect(ap.statusCode).toBe(200)
+  expect(db.tables.approvals[0].status).toBe('granted')
+})
+
+test('approvals: deny flips to denied + emits govern.denied', async () => {
+  const db = fakeData()
+  db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'p1', action: 'project.delete', status: 'pending', requested_at: 'now', decided_at: null })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/approvals/a1/deny', headers: { authorization: 'Bearer good' } })
+  expect(r.statusCode).toBe(200)
+  expect(db.tables.approvals[0].status).toBe('denied')
+  expect(db.tables.events.map((e: any) => e.kind)).toContain('govern.denied')
+})
+
+test('approve a missing approval → 404', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const r = await app.inject({ method: 'POST', url: '/projects/p1/approvals/nope/approve', headers: { authorization: 'Bearer good' } })
+  expect(r.statusCode).toBe(404)
+})
+
+test('policy: get defaults, set an override', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const p0 = await app.inject({ method: 'GET', url: '/projects/p1/policy', headers: { authorization: 'Bearer good' } })
+  expect(p0.json().policy['project.delete']).toBe('approve')
+  const set = await app.inject({ method: 'PUT', url: '/projects/p1/policy/deploy', headers: { authorization: 'Bearer good' }, payload: { decision: 'approve' } })
+  expect(set.statusCode).toBe(200)
+  expect(set.json().policy.deploy).toBe('approve')
+})
+
+test('policy: unknown action → 400', async () => {
+  const db = fakeData()
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const r = await app.inject({ method: 'PUT', url: '/projects/p1/policy/bogus', headers: { authorization: 'Bearer good' }, payload: { decision: 'deny' } })
+  expect(r.statusCode).toBe(400)
 })

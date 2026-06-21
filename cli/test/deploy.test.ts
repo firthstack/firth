@@ -97,3 +97,12 @@ test('error when neither <dir> nor --image is given', async () => {
   expect(await deploy([], d as any)).toBe(1)
   expect(out.join('\n')).toMatch(/usage|provide/i)
 })
+
+test('source/image deploy: approval_required response is reported, exits 1', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)
+  const api = { deploy: async () => ({ status: 'approval_required', approvalId: 'a9', action: 'deploy' }) }
+  const out: string[] = []
+  const d = { print: (s: string) => out.push(s), home: dir, cwd: dir, env: {}, makeApi: () => api }
+  expect(await deploy(['--image', 'nginx'], d as any)).toBe(1)
+  expect(out.join('\n')).toMatch(/requires approval \(id a9\)/)
+})

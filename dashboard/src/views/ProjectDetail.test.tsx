@@ -33,6 +33,9 @@ function fakeApi(overrides: Partial<Api> = {}): Api {
         ? { DATABASE_URL: 'postgres://u:p@h/db' }
         : { AWS_ACCESS_KEY_ID: 'tid_x', AWS_SECRET_ACCESS_KEY: 'sek_y', AWS_ENDPOINT_URL_S3: 'https://t3.storage.dev', BUCKET_NAME: 'firth-first-ab12', AWS_REGION: 'auto' }
     ),
+    listApprovals: vi.fn(async () => []),
+    approve: vi.fn(async () => ({})),
+    deny: vi.fn(async () => ({})),
     ...overrides,
   } as unknown as Api
 }
@@ -159,5 +162,19 @@ describe('ProjectDetail', () => {
     await userEvent.clear(screen.getByLabelText(/^from$/i))
     await userEvent.click(screen.getByRole('button', { name: /^\[ok\]$/i }))
     await waitFor(() => expect(createBranch).toHaveBeenCalledWith('p1', 'empty-from-test', 'main'))
+  })
+
+  // ---- approvals panel -------------------------------------------------------
+
+  it('approvals panel lists a pending approval and approves it', async () => {
+    const approved: string[] = []
+    const api = fakeApi({
+      listApprovals: vi.fn(async () => [{ id: 'a1', action: 'project.delete', status: 'pending', requested_at: 'now' }]),
+      approve: vi.fn(async (_pid: string, id: string) => { approved.push(id); return {} }),
+    })
+    render(<ProjectDetail api={api} projectId="p1" onBack={vi.fn()} />)
+    expect(await screen.findByText('project.delete')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /approve/i }))
+    expect(approved).toEqual(['a1'])
   })
 })

@@ -12,6 +12,7 @@ import { deploy } from './commands/deploy.js'
 import { events } from './commands/events.js'
 import { observeSync } from './commands/observe.js'
 import { status } from './commands/status.js'
+import { approvals, approve, deny, policy } from './commands/govern.js'
 import { defaultRunner, type Runner } from './fly.js'
 import { defaultBuildRunner, type BuildRunner } from './flyctl-build.js'
 
@@ -50,6 +51,10 @@ Commands:
   project delete            Delete the linked project + all resources (--yes)
   branch switch <name>      Set the current branch (secrets/events default to it)
   branch delete <name>      Delete a branch + its Neon branch (--yes)
+  approvals                 List pending approvals
+  approve <id>              Approve a pending request
+  deny <id>                 Deny a pending request
+  policy [set <a> <d>]      Show or set the project's govern policy
   --help                    Show this help
   --version, -v             Print the CLI version`
 
@@ -72,6 +77,10 @@ COMMANDS['branch switch'] = branchSwitch
 COMMANDS['branch delete'] = branchDelete
 COMMANDS['project delete'] = projectDelete
 COMMANDS['status'] = status
+COMMANDS['approvals'] = approvals
+COMMANDS['approve'] = approve
+COMMANDS['deny'] = deny
+COMMANDS['policy'] = policy
 
 export async function route(argv: string[], deps: CliDeps): Promise<number> {
   if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {

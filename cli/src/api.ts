@@ -65,9 +65,18 @@ export class FirthApi {
     return this.req('POST', `/projects/${projectId}/branches`, { name, from })
   }
   listBranches(projectId: string) { return this.req('GET', `/projects/${projectId}/branches`).then((r) => r.branches as any[]) }
-  getSecrets(projectId: string, branch?: string) {
+  getSecrets(projectId: string, branch?: string): Promise<{ secrets?: Record<string, string>; status?: string; approvalId?: string; action?: string }> {
     const q = branch ? `?branch=${encodeURIComponent(branch)}` : ''
-    return this.req('GET', `/projects/${projectId}/secrets${q}`).then((r) => r.secrets as Record<string, string>)
+    return this.req('GET', `/projects/${projectId}/secrets${q}`)
+  }
+  listApprovals(projectId: string, status?: string): Promise<any[]> {
+    return this.req('GET', `/projects/${projectId}/approvals${status ? `?status=${status}` : ''}`).then((r) => r.approvals)
+  }
+  approve(projectId: string, id: string) { return this.req('POST', `/projects/${projectId}/approvals/${id}/approve`).then((r) => r.approval) }
+  deny(projectId: string, id: string) { return this.req('POST', `/projects/${projectId}/approvals/${id}/deny`).then((r) => r.approval) }
+  getPolicy(projectId: string): Promise<Record<string, string>> { return this.req('GET', `/projects/${projectId}/policy`).then((r) => r.policy) }
+  setPolicy(projectId: string, action: string, decision: string): Promise<Record<string, string>> {
+    return this.req('PUT', `/projects/${projectId}/policy/${action}`, { decision }).then((r) => r.policy)
   }
   deploy(projectId: string, opts: { image: string; from?: string; port?: number; branch?: string }) {
     return this.req('POST', `/projects/${projectId}/deploy`, opts)

@@ -5,6 +5,7 @@ import type { CliDeps } from '../index.js'
 import { formatTeardown } from './util.js'
 import { ensureFlyctl } from '../fly.js'
 import { ensureSkills } from '../ensure-skills.js'
+import { reportIfGated } from './govern.js'
 
 // Build a FirthApi from stored config; tests can override via deps.makeApi.
 export function apiFromDeps(deps: CliDeps & { makeApi?: () => FirthApi }): FirthApi {
@@ -65,6 +66,7 @@ export async function projectDelete(argv: string[], deps: CliDeps & { makeApi?: 
       return 1
     }
     const out = await apiFromDeps(deps).deleteProject(link.projectId)
+    if (reportIfGated(out, deps)) return 1
     clearProjectLink(deps.cwd)
     deps.print(`deleted project ${link.projectId}${formatTeardown(out.teardown ?? {})}; unlinked ./.firth/project.json`)
     return 0

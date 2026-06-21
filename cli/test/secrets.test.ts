@@ -12,7 +12,7 @@ test('secrets merges project + branch scoped secrets into .env, never printing v
     listBranches: async () => [{ id: 'b-main', name: 'main', is_default: true }],
     // seam is either/or: no branch → project-scoped (AWS_*); branch id → that branch's DATABASE_URL
     getSecrets: async (_pid: string, branch?: string) =>
-      branch === 'b-main' ? { DATABASE_URL: 'postgresql://secret' } : { AWS_ACCESS_KEY_ID: 'tid_x' },
+      branch === 'b-main' ? { secrets: { DATABASE_URL: 'postgresql://secret' } } : { secrets: { AWS_ACCESS_KEY_ID: 'tid_x' } },
   }
   const d = { print: (s: string) => out.push(s), out, home: dir, cwd: dir, env: {}, makeApi: () => api }
   expect(await secrets([], d as any)).toBe(0)
@@ -33,7 +33,7 @@ test('secrets uses current branch when set and no --branch flag', async () => {
       { id: 'b99', name: 'staging' },
     ],
     getSecrets: async (_pid: string, branch?: string) =>
-      branch === 'b99' ? { STAGING_URL: 'https://staging.example' } : { AWS_KEY: 'aws-val' },
+      branch === 'b99' ? { secrets: { STAGING_URL: 'https://staging.example' } } : { secrets: { AWS_KEY: 'aws-val' } },
   }
   const d = { print: () => {}, home: dir, cwd: dir, env: {}, makeApi: () => api }
   expect(await secrets([], d as any)).toBe(0)
@@ -48,7 +48,7 @@ test('secrets preserves user-added .env lines and updates stale Firth keys', asy
   const api = {
     listBranches: async () => [{ id: 'b-main', name: 'main', is_default: true }],
     getSecrets: async (_pid: string, branch?: string) =>
-      branch === 'b-main' ? { DATABASE_URL: 'postgresql://NEW' } : { AWS_ACCESS_KEY_ID: 'tid_x' },
+      branch === 'b-main' ? { secrets: { DATABASE_URL: 'postgresql://NEW' } } : { secrets: { AWS_ACCESS_KEY_ID: 'tid_x' } },
   }
   const d = { print: () => {}, home: dir, cwd: dir, env: {}, makeApi: () => api }
   expect(await secrets([], d as any)).toBe(0)

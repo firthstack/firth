@@ -1,5 +1,5 @@
 import { describe, expect, it, test } from 'vitest'
-import { ProjectsRepo, SecretsRepo, ResourcesRepo, BranchesRepo, EventsRepo } from '../../src/db/repos.js'
+import { ProjectsRepo, SecretsRepo, ResourcesRepo, BranchesRepo, EventsRepo, GovernanceRepo } from '../../src/db/repos.js'
 
 // PostgREST-faithful in-memory DataClient.
 // eq/is semantics mirror real PostgREST:
@@ -7,23 +7,33 @@ import { ProjectsRepo, SecretsRepo, ResourcesRepo, BranchesRepo, EventsRepo } fr
 //   is(col, null)  → matches rows where col is null/undefined
 // Supports insert / update / select modes including insert().select() returning the inserted row.
 function fakeDb(seed: Record<string, any[]> = {}) {
-  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [], events: [], ...seed }
+  const tables: Record<string, any[]> = { projects: [], branches: [], resources: [], secrets: [], events: [], governance_rules: [], approvals: [], ...seed }
   return {
     tables,
     from(table: string) {
       let rows = tables[table]
       const filters: Array<(r: any) => boolean> = []
       let mode: 'insert' | 'update' | 'select' = 'select'
-      let insertedRow: any
+      let inserted: any
       let updatePayload: any
+      const t = table
       const api: any = {
         insert(values: any) {
           mode = 'insert'
           const arr = Array.isArray(values) ? values : [values]
           const row = { id: `${table}-${tables[table].length}`, created_at: String(tables[table].length).padStart(10, '0'), ...arr[0] }
           tables[table].push(row)
-          insertedRow = row
+          inserted = row
           return api
+        },
+        upsert(v: any, opts?: any) {
+          mode = 'insert'
+          if (opts?.onConflict && !opts?.ignoreDuplicates) {
+            const cols = opts.onConflict.split(',')
+            const ex = tables[t].find((r) => cols.every((c: string) => r[c] === v[c]))
+            if (ex) { Object.assign(ex, v); inserted = ex; return api }
+          }
+          const row = { id: `${t}-${tables[t].length}`, ...v }; tables[t].push(row); inserted = row; return api
         },
         update(v: any) { mode = 'update'; updatePayload = v; return api },
         select() { return api },
@@ -42,7 +52,7 @@ function fakeDb(seed: Record<string, any[]> = {}) {
             for (const row of tables[table]) if (filters.every((fn) => fn(row))) Object.assign(row, updatePayload)
             return res({ data: [], error: null })
           }
-          if (mode === 'insert') return res({ data: [insertedRow], error: null })
+          if (mode === 'insert') return res({ data: [inserted], error: null })
           rows = tables[table].filter((r) => filters.every((fn) => fn(r)))
           return res({ data: rows, error: null })
         },
@@ -51,6 +61,9 @@ function fakeDb(seed: Record<string, any[]> = {}) {
     },
   }
 }
+
+// Alias used by GovernanceRepo tests
+const fakeData = fakeDb
 
 // ─── Original tests (restored from 2579a56) ──────────────────────────────────
 
@@ -196,4 +209,38 @@ describe('ResourcesRepo.findByKindForBranch', () => {
     const none = await repo.findByKindForBranch('o', 'p', 'b-missing', 'fly')
     expect(none).toBeNull()
   })
+})
+
+describe('GovernanceRepo.findGrantedApproval ordering', () => {
+  it('returns the oldest granted approval when multiple exist (not insertion order)', async () => {
+    const olderTs = new Date('2024-01-01T10:00:00.000Z').toISOString()
+    const newerTs = new Date('2024-01-01T11:00:00.000Z').toISOString()
+    // Seed NEWER first so that insertion-order [0] would return the wrong (newer) row.
+    const db = fakeDb({
+      approvals: [
+        { id: 'ap-newer', owner: 'o1', project_id: 'p1', action: 'project.delete', status: 'granted', requested_at: newerTs },
+        { id: 'ap-older', owner: 'o1', project_id: 'p1', action: 'project.delete', status: 'granted', requested_at: olderTs },
+      ],
+    })
+    const repo = new GovernanceRepo(db as any)
+    const result = await repo.findGrantedApproval('o1', 'p1', 'project.delete')
+    expect(result?.id).toBe('ap-older')
+  })
+})
+
+test('GovernanceRepo: upsert/find rule, grant lifecycle', async () => {
+  const db = fakeData()
+  const repo = new GovernanceRepo(db as any)
+  await repo.upsertRule('o1', 'p1', 'project.delete', 'approve')
+  await repo.upsertRule('o1', 'p1', 'project.delete', 'deny') // upsert overrides
+  expect((await repo.findRule('o1', 'p1', 'project.delete'))?.decision).toBe('deny')
+  expect(await repo.findRule('o1', 'p1', 'deploy')).toBeNull()
+
+  const ap = await repo.createApproval('o1', 'p1', 'project.delete')
+  expect(ap.status).toBe('pending')
+  expect(await repo.findGrantedApproval('o1', 'p1', 'project.delete')).toBeNull()
+  await repo.decideApproval('o1', ap.id, 'granted')
+  expect((await repo.findGrantedApproval('o1', 'p1', 'project.delete'))?.id).toBe(ap.id)
+  await repo.markConsumed('o1', ap.id)
+  expect(await repo.findGrantedApproval('o1', 'p1', 'project.delete')).toBeNull()
 })
