@@ -51,6 +51,8 @@ export class GovernService {
     const found = await this.repo.findApproval(owner, projectId, approvalId)
     if (!found) throw new NotFoundError('approval not found')
     await this.repo.decideApproval(owner, approvalId, status)
-    return { ...found, status, decided_at: new Date().toISOString() }
+    const updated = await this.repo.findApproval(owner, projectId, approvalId)
+    if (!updated) throw new NotFoundError('approval not found')
+    return updated
   }
 }
