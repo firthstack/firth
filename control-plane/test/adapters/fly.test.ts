@@ -194,27 +194,24 @@ describe('FlyAdapter.deploy', () => {
   })
 })
 
-test('mintDeployToken requests an app-scoped deploy token via GraphQL and returns it', async () => {
+test('mintDeployToken POSTs the Machines deploy_token endpoint and returns the FlyV1 token', async () => {
   let captured: any
   const http: HttpClient = async (url, init) => {
-    captured = { url, body: JSON.parse(init.body as string) }
-    return { status: 200, json: async () => ({ data: { createLimitedAccessToken: { token: 'FlyV1 deploy-abc' } } }), text: async () => '' }
+    captured = { url, method: init.method, body: JSON.parse(init.body as string) }
+    return { status: 200, json: async () => ({ token: 'FlyV1 deploy-abc' }), text: async () => '' }
   }
   const fly = new FlyAdapter('org-token', 'my-org', http)
   const out = await fly.mintDeployToken({ kind: 'fly', providerRef: { flyApp: 'firth-x-ab12', orgSlug: 'my-org' } }, { expirySeconds: 1200 })
   expect(out).toEqual({ token: 'FlyV1 deploy-abc', expirySeconds: 1200 })
-  expect(captured.url).toMatch(/graphql/)
-  expect(captured.body.query).toMatch(/createLimitedAccessToken/)
-  // app-scoped + deploy profile (exact input fields are [VERIFY-LIVE], so assert on the variables blob loosely)
-  const vars = JSON.stringify(captured.body.variables)
-  expect(vars).toMatch(/firth-x-ab12/)
-  expect(vars).toMatch(/deploy/)
+  expect(captured.method).toBe('POST')
+  expect(captured.url).toMatch(/\/apps\/firth-x-ab12\/deploy_token$/) // app-scoped
+  expect(captured.body).toEqual({ expiry: '1200s' })
 })
 
-test('mintDeployToken throws when Fly returns no token', async () => {
-  const http: HttpClient = async () => ({ status: 200, json: async () => ({ data: { createLimitedAccessToken: {} } }), text: async () => '' })
+test('mintDeployToken throws when the token lacks the FlyV1 prefix', async () => {
+  const http: HttpClient = async () => ({ status: 200, json: async () => ({ token: 'not-a-flyv1' }), text: async () => '' })
   const fly = new FlyAdapter('t', 'o', http)
   await expect(
     fly.mintDeployToken({ kind: 'fly', providerRef: { flyApp: 'a', orgSlug: 'o' } }, { expirySeconds: 600 }),
-  ).rejects.toThrow()
+  ).rejects.toThrow(/FlyV1/)
 })

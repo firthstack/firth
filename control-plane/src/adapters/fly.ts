@@ -102,21 +102,13 @@ export class FlyAdapter implements ComputeAdapter {
 
   async mintDeployToken(handle: ResourceHandle, opts: { expirySeconds: number }): Promise<{ token: string; expirySeconds: number }> {
     const ref = handle.providerRef as FlyRef
-    const minutes = Math.max(1, Math.round(opts.expirySeconds / 60))
-    // [VERIFY-LIVE] CreateLimitedAccessTokenInput shape (profile name, profileParams.app_id form,
-    // whether organizationId is required when app-scoped). Pinned live in scripts/live-deploy-token-check.ts.
-    const data = await this.graphql(
-      'mutation($input: CreateLimitedAccessTokenInput!) { createLimitedAccessToken(input: $input) { token } }',
-      { input: {
-        name: `firth-deploy-${ref.flyApp}`,
-        organizationId: this.orgSlug,
-        profile: 'deploy',
-        profileParams: { app_id: ref.flyApp },
-        expiry: `${minutes}m`,
-      } },
-    )
-    const token = data?.createLimitedAccessToken?.token
-    if (!token) throw new Error('fly did not return a deploy token')
+    // Machines API mints an app-scoped deploy token: POST /apps/<app>/deploy_token
+    // → { token: "FlyV1 …" } (NOT the GraphQL createLimitedAccessToken mutation —
+    // that payload has no `token` field). Mirrors InsForge's compute deploy mint.
+    const data = await this.call('POST', `/apps/${ref.flyApp}/deploy_token`, { expiry: `${opts.expirySeconds}s` })
+    const token = String(data?.token ?? '').trim()
+    // shape-only check — never echo token content (it's credential material).
+    if (!token.startsWith('FlyV1 ')) throw new Error(`fly deploy_token returned a malformed token (no FlyV1 prefix; len=${token.length})`)
     return { token, expirySeconds: opts.expirySeconds }
   }
 
