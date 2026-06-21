@@ -23,7 +23,7 @@ export type NewEventRow = {
 export type EventRow = NewEventRow & { id: string; created_at: string }
 
 export type Decision = 'allow' | 'deny' | 'approve'
-export type GovernanceRuleRow = { id: string; project_id: string; owner: string; action: string; decision: Decision }
+export type GovernanceRuleRow = { id: string; project_id: string; owner: string; action: string; decision: Decision; updated_at?: string }
 export type ApprovalStatus = 'pending' | 'granted' | 'denied' | 'consumed'
 export type ApprovalRow = {
   id: string; project_id: string; owner: string; action: string

@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify'
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify'
 import cors from '@fastify/cors'
 import type { FirthConfig } from './config.js'
 import { resolveUid, UnauthorizedError, NotFoundError, ConflictError, ForbiddenError } from './auth.js'
@@ -26,7 +26,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: false })
 
   app.setErrorHandler((err, _req, reply) => {
-    // Static strings only — never echo err.message/stack (they may carry tokens or secrets).
+    // UnauthorizedError always sends the fixed string 'unauthorized'. Typed errors (NotFound/Conflict/Forbidden)
+    // send err.message, which is author-controlled and never user input or secrets — never the stack. The 500
+    // fallback is a generic static string.
     if (err instanceof UnauthorizedError) return reply.code(401).send({ error: 'unauthorized' })
     if (err instanceof NotFoundError) return reply.code(404).send({ error: err.message })
     if (err instanceof ConflictError) return reply.code(409).send({ error: err.message })
@@ -46,7 +48,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   }
 
   // Returns true if the caller should proceed; false means a 202 was already sent.
-  async function gateOrReply(db: DataClient, uid: string, projectId: string, action: GatedAction, branchId: string | null, reply: any): Promise<boolean> {
+  async function gateOrReply(db: DataClient, uid: string, projectId: string, action: GatedAction, branchId: string | null, reply: FastifyReply): Promise<boolean> {
     const g = await new GovernService(db).gate(uid, projectId, action)
     if (g.decision === 'deny') throw new ForbiddenError(`${action} denied by policy`)
     if (g.decision === 'approval_required') {

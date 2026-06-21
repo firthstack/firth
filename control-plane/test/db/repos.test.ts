@@ -244,3 +244,90 @@ test('GovernanceRepo: upsert/find rule, grant lifecycle', async () => {
   await repo.markConsumed('o1', ap.id)
   expect(await repo.findGrantedApproval('o1', 'p1', 'project.delete')).toBeNull()
 })
+
+describe('GovernanceRepo: listRules', () => {
+  it('returns only rules for the matching owner+project, not those for a different project', async () => {
+    const db = fakeData()
+    const repo = new GovernanceRepo(db as any)
+    // Two rules for the project under test
+    await repo.upsertRule('o1', 'p1', 'deploy', 'deny')
+    await repo.upsertRule('o1', 'p1', 'project.delete', 'approve')
+    // One rule for a different project that must NOT appear
+    await repo.upsertRule('o1', 'p2', 'deploy', 'allow')
+
+    const rules = await repo.listRules('o1', 'p1')
+    expect(rules).toHaveLength(2)
+    const actions = rules.map((r) => r.action).sort()
+    expect(actions).toEqual(['deploy', 'project.delete'])
+    // Confirm each returned rule belongs to the right project
+    for (const r of rules) {
+      expect(r.owner).toBe('o1')
+      expect(r.project_id).toBe('p1')
+    }
+  })
+})
+
+describe('GovernanceRepo: listApprovals', () => {
+  it('returns all approvals for the project and filters by status when provided', async () => {
+    const db = fakeData()
+    const repo = new GovernanceRepo(db as any)
+    // Seed: two pending + one granted for p1, and one pending for p2 (must not appear)
+    const ap1 = await repo.createApproval('o1', 'p1', 'deploy')
+    const ap2 = await repo.createApproval('o1', 'p1', 'project.delete')
+    const ap3 = await repo.createApproval('o1', 'p1', 'branch.delete')
+    await repo.decideApproval('o1', ap3.id, 'granted')
+    await repo.createApproval('o1', 'p2', 'deploy') // different project — must not appear
+
+    // Unfiltered: returns all three p1 approvals
+    const all = await repo.listApprovals('o1', 'p1')
+    expect(all).toHaveLength(3)
+    expect(all.map((a) => a.id).sort()).toEqual([ap1.id, ap2.id, ap3.id].sort())
+
+    // Filtered to 'pending': only the two pending ones
+    const pending = await repo.listApprovals('o1', 'p1', 'pending')
+    expect(pending).toHaveLength(2)
+    expect(pending.every((a) => a.status === 'pending')).toBe(true)
+    expect(pending.map((a) => a.id).sort()).toEqual([ap1.id, ap2.id].sort())
+
+    // Filtered to 'granted': only the one granted one
+    const granted = await repo.listApprovals('o1', 'p1', 'granted')
+    expect(granted).toHaveLength(1)
+    expect(granted[0].id).toBe(ap3.id)
+    expect(granted[0].status).toBe('granted')
+  })
+})
+
+describe('GovernanceRepo: findApproval', () => {
+  it('returns the matching approval by id and null for a missing id', async () => {
+    const db = fakeData()
+    const repo = new GovernanceRepo(db as any)
+    const ap = await repo.createApproval('o1', 'p1', 'deploy')
+
+    const found = await repo.findApproval('o1', 'p1', ap.id)
+    expect(found).not.toBeNull()
+    expect(found?.id).toBe(ap.id)
+    expect(found?.action).toBe('deploy')
+    expect(found?.status).toBe('pending')
+
+    const missing = await repo.findApproval('o1', 'p1', 'no-such-id')
+    expect(missing).toBeNull()
+  })
+})
+
+describe('GovernanceRepo: decideApproval denied', () => {
+  it("flips status to 'denied' and sets decided_at", async () => {
+    const db = fakeData()
+    const repo = new GovernanceRepo(db as any)
+    const ap = await repo.createApproval('o1', 'p1', 'project.delete')
+    // The fake DataClient does not pre-populate decided_at; the real DB column defaults to NULL.
+    // Either way, decided_at must not be set (truthy) before a decision is made.
+    expect(ap.decided_at).toBeFalsy()
+
+    await repo.decideApproval('o1', ap.id, 'denied')
+
+    // Inspect table state directly to verify the update was applied
+    const row = db.tables.approvals.find((r: any) => r.id === ap.id)
+    expect(row.status).toBe('denied')
+    expect(row.decided_at).toBeTruthy()
+  })
+})

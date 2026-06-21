@@ -46,6 +46,36 @@ test('gate: default allow → allow; explicit deny → deny', async () => {
   expect(await svc.gate('o1', 'p1', 'deploy')).toEqual({ decision: 'deny' })
 })
 
+test('gate: secrets.read and branch.delete default to allow', async () => {
+  const db = fakeData(); const svc = new GovernService(db as any)
+  expect(await svc.gate('o1', 'p1', 'secrets.read')).toEqual({ decision: 'allow' })
+  expect(await svc.gate('o1', 'p1', 'branch.delete')).toEqual({ decision: 'allow' })
+})
+
+test('listApprovals: returns pending approvals filtered by status', async () => {
+  const db = fakeData(); const svc = new GovernService(db as any)
+  // Gate twice to create two pending approvals for project.delete (each gate creates a new pending if none granted)
+  const g1 = await svc.gate('o1', 'p1', 'project.delete')
+  expect(g1.decision).toBe('approval_required')
+  // Grant and consume g1 so the next gate also goes pending
+  await svc.decide('o1', 'p1', (g1 as any).approvalId, 'granted')
+  const g2 = await svc.gate('o1', 'p1', 'project.delete') // consumes the grant → approved, no new pending
+  expect(g2.decision).toBe('approved')
+  // Now create a fresh pending
+  const g3 = await svc.gate('o1', 'p1', 'project.delete')
+  expect(g3.decision).toBe('approval_required')
+
+  // listApprovals filtered to 'pending' should return only the pending one
+  const pending = await svc.listApprovals('o1', 'p1', 'pending')
+  expect(pending).toHaveLength(1)
+  expect(pending[0].id).toBe((g3 as any).approvalId)
+  expect(pending[0].status).toBe('pending')
+
+  // listApprovals without filter returns all approvals for the project
+  const all = await svc.listApprovals('o1', 'p1')
+  expect(all.length).toBeGreaterThanOrEqual(2)
+})
+
 test('effectivePolicy merges defaults with overrides', async () => {
   const db = fakeData(); const svc = new GovernService(db as any)
   await svc.setRule('o1', 'p1', 'deploy', 'approve')
