@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { readProjectLink } from '../config.js'
 import { apiFromDeps } from './project.js'
+import { reportIfGated } from './govern.js'
 import type { CliDeps } from '../index.js'
 import type { FirthApi } from '../api.js'
 
@@ -21,8 +22,10 @@ export async function secrets(argv: string[], deps: CliDeps & { makeApi?: () => 
   if (!target) { deps.print(`branch "${values.branch ?? '(default)'}" not found`); return 1 }
   // The seam returns EITHER project-scoped (no branch) OR branch-scoped; merge both for a complete .env.
   const project = await api.getSecrets(link.projectId)
+  if (reportIfGated(project, deps)) return 1
   const branch = await api.getSecrets(link.projectId, target.id)
-  const bundle = { ...project, ...branch }
+  if (reportIfGated(branch, deps)) return 1
+  const bundle = { ...(project.secrets ?? {}), ...(branch.secrets ?? {}) }
   // Merge Firth-managed keys into any existing .env, preserving user-added lines/comments.
   const path = join(deps.cwd, '.env')
   const firthKeys = new Set(Object.keys(bundle))

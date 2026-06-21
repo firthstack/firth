@@ -5,6 +5,7 @@ import { readProjectLink } from '../config.js'
 import { ensureFlyctl } from '../fly.js'
 import { flyctlBuildAndPush, defaultBuildRunner, type BuildRunner } from '../flyctl-build.js'
 import { apiFromDeps } from './project.js'
+import { reportIfGated } from './govern.js'
 import type { CliDeps } from '../index.js'
 import type { FirthApi } from '../api.js'
 
@@ -27,6 +28,7 @@ export async function deploy(argv: string[], deps: CliDeps & { makeApi?: () => F
     const out = await apiFromDeps(deps).deploy(link.projectId, {
       image: values.image!, from, branch, port: values.port ? Number(values.port) : undefined,
     })
+    if (reportIfGated(out, deps)) return 1
     deps.print(`deployed machine ${out.machineId} → ${out.url}`)
     return 0
   }
@@ -46,6 +48,7 @@ export async function deploy(argv: string[], deps: CliDeps & { makeApi?: () => F
     deps.buildRunner ?? defaultBuildRunner,
   )
   const out = await api.deploy(link.projectId, { image: imageRef, from, branch, port })
+  if (reportIfGated(out, deps)) return 1
   deps.print(`deployed machine ${out.machineId} → ${out.url}`)
   deps.print(`image: ${imageRef} (built remotely)`)
   return 0

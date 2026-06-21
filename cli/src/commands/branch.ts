@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util'
 import { readProjectLink, setCurrentBranch } from '../config.js'
 import { apiFromDeps } from './project.js'
 import { formatTeardown } from './util.js'
+import { reportIfGated } from './govern.js'
 import type { CliDeps } from '../index.js'
 import type { FirthApi } from '../api.js'
 import { ensureFlyctl } from '../fly.js'
@@ -85,6 +86,7 @@ export async function branchDelete(argv: string[], deps: CliDeps & { makeApi?: (
       return 1
     }
     const out = await apiFromDeps(deps).deleteBranch(projectId, target.id)
+    if (reportIfGated(out, deps)) return 1
     // If the deleted branch is the current one, clear it
     const link = readProjectLink(deps.cwd)
     if (link?.branch?.id === target.id) {
