@@ -4,6 +4,7 @@ import type { FirthConfig } from './config.js'
 import { resolveUid, UnauthorizedError, NotFoundError, ConflictError, ForbiddenError } from './auth.js'
 import type { DataClient } from './db/types.js'
 import { ProjectsRepo, SecretsRepo, BranchesRepo, ResourcesRepo, EventsRepo } from './db/repos.js'
+import { GovernService, type GatedAction } from './services/govern.js'
 import { decryptSecret } from './crypto/secrets.js'
 import { ProvisioningService } from './services/provisioning.js'
 import { BranchService } from './services/branches.js'
@@ -42,6 +43,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   async function emit(db: DataClient, uid: string, projectId: string, branchId: string | null, kind: string, payload: Record<string, unknown>) {
     try { await new EventsRepo(db).record({ project_id: projectId, owner: uid, branch_id: branchId, source: 'resource', kind, payload }) }
     catch { /* swallow */ }
+  }
+
+  // Returns true if the caller should proceed; false means a 202 was already sent.
+  async function gateOrReply(db: DataClient, uid: string, projectId: string, action: GatedAction, branchId: string | null, reply: any): Promise<boolean> {
+    const g = await new GovernService(db).gate(uid, projectId, action)
+    if (g.decision === 'deny') throw new ForbiddenError(`${action} denied by policy`)
+    if (g.decision === 'approval_required') {
+      await emit(db, uid, projectId, branchId, 'govern.pending', { action, approvalId: g.approvalId })
+      reply.code(202).send({ status: 'approval_required', approvalId: g.approvalId, action,
+        message: `${action} requires approval — have a human run \`firth approve ${g.approvalId}\`, then retry` })
+      return false
+    }
+    if (g.decision === 'approved') await emit(db, uid, projectId, branchId, 'govern.approved', { action, approvalId: g.approvalId })
+    return true
   }
 
   app.register(cors, {
@@ -83,6 +98,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.delete('/projects/:id', async (req, reply) => {
     const { uid, token, db } = await auth(req)
     const projectId = (req.params as any).id
+    if (!(await gateOrReply(db, uid, projectId, 'project.delete', null, reply))) return
     const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
     const out = await new TeardownService(db, deps.cfg, adapters).deleteProject(uid, projectId)
     await emit(db, uid, projectId, null, 'project.delete', { teardown: out.teardown })
@@ -93,6 +109,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const { uid, token, db } = await auth(req)
     const projectId = (req.params as any).id
     const branchId = (req.params as any).bid
+    if (!(await gateOrReply(db, uid, projectId, 'branch.delete', branchId, reply))) return
     const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
     const out = await new TeardownService(db, deps.cfg, adapters).deleteBranch(uid, projectId, branchId)
     await emit(db, uid, projectId, branchId, 'branch.delete', { name: out.branch.name, teardown: out.teardown })
@@ -122,6 +139,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const { uid, db } = await auth(req)
     const projectId = (req.params as any).id
     const branch = (req.query as any).branch ?? null
+    if (!(await gateOrReply(db, uid, projectId, 'secrets.read', branch, reply))) return
     const rows = await new SecretsRepo(db).listForScope(uid, projectId, branch)
     const bundle: Record<string, string> = {}
     for (const row of rows) {
@@ -143,6 +161,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       const all = await new BranchesRepo(db).listByProject(uid, projectId)
       branch = (all.find((b) => b.is_default) ?? all[0])?.id
     }
+    if (!(await gateOrReply(db, uid, projectId, 'deploy', branch ?? null, reply))) return
     const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
     const out = await new DeployService(db, deps.cfg, adapters).deploy(uid, projectId, {
       image: body.image, from: branch, port: body.port,
