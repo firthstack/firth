@@ -189,7 +189,10 @@ export class GovernanceRepo {
     const { data, error } = await this.db.from('approvals').select()
       .eq('owner', owner).eq('project_id', projectId).eq('action', action).eq('status', 'granted')
     if (error) throw error
-    return ((data ?? [])[0] as ApprovalRow) ?? null
+    const rows = (data ?? []) as ApprovalRow[]
+    // oldest-first; app-side because the fake (and v1) don't use SQL ORDER (mirrors listEvents). One grant consumed per gate.
+    const sorted = [...rows].sort((a, b) => (a.requested_at < b.requested_at ? -1 : a.requested_at > b.requested_at ? 1 : 0))
+    return sorted[0] ?? null
   }
   async findApproval(owner: string, projectId: string, id: string): Promise<ApprovalRow | null> {
     const { data, error } = await this.db.from('approvals').select()

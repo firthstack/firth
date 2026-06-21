@@ -211,6 +211,23 @@ describe('ResourcesRepo.findByKindForBranch', () => {
   })
 })
 
+describe('GovernanceRepo.findGrantedApproval ordering', () => {
+  it('returns the oldest granted approval when multiple exist (not insertion order)', async () => {
+    const olderTs = new Date('2024-01-01T10:00:00.000Z').toISOString()
+    const newerTs = new Date('2024-01-01T11:00:00.000Z').toISOString()
+    // Seed NEWER first so that insertion-order [0] would return the wrong (newer) row.
+    const db = fakeDb({
+      approvals: [
+        { id: 'ap-newer', owner: 'o1', project_id: 'p1', action: 'project.delete', status: 'granted', requested_at: newerTs },
+        { id: 'ap-older', owner: 'o1', project_id: 'p1', action: 'project.delete', status: 'granted', requested_at: olderTs },
+      ],
+    })
+    const repo = new GovernanceRepo(db as any)
+    const result = await repo.findGrantedApproval('o1', 'p1', 'project.delete')
+    expect(result?.id).toBe('ap-older')
+  })
+})
+
 test('GovernanceRepo: upsert/find rule, grant lifecycle', async () => {
   const db = fakeData()
   const repo = new GovernanceRepo(db as any)
