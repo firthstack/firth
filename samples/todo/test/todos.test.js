@@ -13,8 +13,13 @@ before(() => {
 })
 after(async () => { await pool.end() })
 
-// Isolate every test inside a transaction we roll back — no data persists.
-beforeEach(async () => { client = await pool.connect(); await client.query('begin') })
+// Isolate every test inside a transaction we roll back — no data persists. The DELETE gives each
+// test a clean slate even when the live table already holds real rows; the rollback restores them.
+beforeEach(async () => {
+  client = await pool.connect()
+  await client.query('begin')
+  await client.query('delete from todos')
+})
 afterEach(async () => { await client.query('rollback'); client.release() })
 
 test('createTodo inserts and returns the row', async () => {
