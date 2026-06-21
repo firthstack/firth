@@ -198,6 +198,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     catch (e) { return reply.code(401).send({ error: e instanceof Error ? e.message : 'login failed' }) }
   })
 
+  app.post('/auth/refresh', async (req, reply) => {
+    const { refreshToken } = (req.body as any) ?? {}
+    if (!refreshToken) return reply.code(400).send({ error: 'refreshToken is required' })
+    try { return reply.send(await deps.authProxy!.refresh(refreshToken)) }
+    catch { return reply.code(401).send({ error: 'invalid refresh token' }) }
+  })
+
   app.post('/auth/signup', async (req, reply) => {
     const { email, password, name, redirectTo } = (req.body as any) ?? {}
     if (!email || !password) return reply.code(400).send({ error: 'email and password are required' })

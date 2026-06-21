@@ -3,20 +3,30 @@ import type { FirthConfig } from './config.js'
 import type { DataClient } from './db/types.js'
 
 export type AuthProxy = {
-  login(email: string, password: string): Promise<{ token: string; user: { id: string; email: string } }>
+  login(email: string, password: string): Promise<{ token: string; refreshToken: string; user: { id: string; email: string } }>
+  refresh(refreshToken: string): Promise<{ token: string; refreshToken: string }>
   signUp(email: string, password: string, name?: string, redirectTo?: string): Promise<{ token: string | null; needsVerification: boolean; user: { id: string; email: string } | null }>
   resendVerification(email: string, redirectTo?: string): Promise<void>
   me(token: string): Promise<{ id: string; email: string } | null>
 }
 
-export function authProxy(cfg: FirthConfig): AuthProxy {
-  const anon = createClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey })
+export function authProxy(cfg: FirthConfig, makeClient: typeof createClient = createClient): AuthProxy {
+  // Server mode: signInWithPassword returns the refresh token in the body (web mode
+  // would stash it in an httpOnly cookie we can't read), and refreshSession({ refreshToken })
+  // rotates it. The control plane is a server — it holds + relays these tokens to clients.
+  const anon = makeClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey, isServerMode: true })
   return {
     async login(email, password) {
       const { data, error } = await anon.auth.signInWithPassword({ email, password })
       if (error) throw error
       if (!data?.accessToken) throw new Error('email not verified')
-      return { token: data.accessToken, user: { id: data.user.id, email: data.user.email } }
+      return { token: data.accessToken, refreshToken: (data as any).refreshToken, user: { id: data.user.id, email: data.user.email } }
+    },
+    async refresh(refreshToken) {
+      const { data, error } = await anon.auth.refreshSession({ refreshToken })
+      if (error) throw error
+      if (!data?.accessToken) throw new Error('refresh failed')
+      return { token: data.accessToken, refreshToken: (data as any).refreshToken }
     },
     async signUp(email, password, name, redirectTo) {
       const { data, error } = await anon.auth.signUp({ email, password, name, redirectTo })
@@ -32,7 +42,7 @@ export function authProxy(cfg: FirthConfig): AuthProxy {
       if (error) throw error
     },
     async me(token) {
-      const c = createClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey, accessToken: token })
+      const c = makeClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey, accessToken: token })
       const { data } = await c.auth.getCurrentUser()   // invalid token → no user → null (treated as 401)
       return data?.user ? { id: data.user.id, email: data.user.email } : null
     },
