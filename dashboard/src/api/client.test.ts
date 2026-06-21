@@ -118,4 +118,10 @@ describe('Api', () => {
     await api.deny('p1', 'a1')
     expect(seen).toEqual(['http://cp/projects/p1/approvals?status=pending', 'http://cp/projects/p1/approvals/a1/approve', 'http://cp/projects/p1/approvals/a1/deny'])
   })
+
+  it('getSecrets returns {} when the response carries no secrets (gated 202)', async () => {
+    const fetcher = (() => Promise.resolve(resp(202, { status: 'approval_required', approvalId: 'a1', action: 'secrets.read' }))) as unknown as typeof fetch
+    const api = new Api('http://cp', () => 't', fetcher)
+    expect(await api.getSecrets('p1')).toEqual({})
+  })
 })

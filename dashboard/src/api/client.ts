@@ -92,7 +92,7 @@ export class Api {
 
   getSecrets(projectId: string, branch?: string): Promise<Record<string, string>> {
     const q = branch ? `?branch=${encodeURIComponent(branch)}` : ''
-    return this.req('GET', `/projects/${projectId}/secrets${q}`).then((r) => r.secrets)
+    return this.req('GET', `/projects/${projectId}/secrets${q}`).then((r) => r.secrets ?? {})
   }
 
   listApprovals(projectId: string, status?: string): Promise<Array<{ id: string; action: string; status: string; requested_at: string }>> {
