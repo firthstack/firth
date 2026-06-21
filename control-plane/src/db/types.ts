@@ -22,6 +22,14 @@ export type NewEventRow = {
 }
 export type EventRow = NewEventRow & { id: string; created_at: string }
 
+export type Decision = 'allow' | 'deny' | 'approve'
+export type GovernanceRuleRow = { id: string; project_id: string; owner: string; action: string; decision: Decision }
+export type ApprovalStatus = 'pending' | 'granted' | 'denied' | 'consumed'
+export type ApprovalRow = {
+  id: string; project_id: string; owner: string; action: string
+  status: ApprovalStatus; requested_at: string; decided_at: string | null
+}
+
 // The subset of @insforge/sdk's `database` query builder we depend on.
 export interface QueryBuilder {
   insert(values: object | object[]): QueryBuilder
