@@ -7,9 +7,13 @@ export class ValidationError extends Error {}
 export function makePool(connectionString = process.env.DATABASE_URL) {
   const cs = connectionString ?? ''
   const needsSsl = /\bsslmode=require\b/.test(cs)
-  // Strip sslmode from the connection string so pg-connection-string doesn't
-  // emit SSL deprecation warnings; we pass ssl directly to pg.Pool instead.
-  const cleanCs = cs.replace(/[&?]sslmode=[^&]*/g, '').replace(/[?&]$/, '')
+  // Strip sslmode from the connection string so pg-connection-string doesn't emit SSL
+  // deprecation warnings; we pass ssl directly to pg.Pool instead. Remove the param with one
+  // adjacent separator (the trailing one if present, else the leading one) so the remaining
+  // query string stays valid no matter where sslmode sits.
+  const cleanCs = cs
+    .replace(/([?&])sslmode=[^&]*(&)?/, (_m, lead, trail) => (trail ? lead : ''))
+    .replace(/[?&]$/, '')
   return new pg.Pool({
     connectionString: cleanCs,
     ssl: needsSsl ? { rejectUnauthorized: false } : undefined,

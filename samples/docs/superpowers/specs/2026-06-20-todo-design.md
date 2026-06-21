@@ -74,13 +74,16 @@ create table if not exists todos (
   id         uuid primary key default gen_random_uuid(),
   title      text not null check (char_length(title) between 1 and 500),
   completed  boolean not null default false,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  created_at timestamptz not null default clock_timestamp(),
+  updated_at timestamptz not null default clock_timestamp()
 );
 create index if not exists todos_created_at_idx on todos (created_at);
 ```
 
-`gen_random_uuid()` is built into Postgres 13+ (Neon supports it natively).
+`gen_random_uuid()` is built into Postgres 13+ (Neon supports it natively). The timestamp defaults use
+`clock_timestamp()` (not `now()`) so rows inserted within the same transaction get distinct,
+monotonically increasing timestamps — this keeps `order by created_at` stable and makes the
+transaction-isolated data-layer tests deterministic.
 
 ## API
 
