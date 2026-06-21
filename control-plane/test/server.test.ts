@@ -571,6 +571,7 @@ test('DELETE /projects/:id is gated: default approve → 202 pending, project no
   expect(typeof r.json().approvalId).toBe('string')
   expect(db.tables.approvals.filter((a: any) => a.status === 'pending')).toHaveLength(1)
   expect(db.tables.events.map((e: any) => e.kind)).toContain('govern.pending')
+  expect(destroyed).toBe(false)
 })
 
 test('DELETE /projects/:id proceeds after the approval is granted (grant consumed)', async () => {
@@ -589,7 +590,10 @@ test('DELETE /projects/:id with policy=deny → 403, not torn down', async () =>
   const db = fakeData()
   await db.from('projects').insert({ owner: 'uid-1', name: 'gp', status: 'active' })
   db.tables.governance_rules.push({ id: 'gr1', owner: 'uid-1', project_id: 'projects-0', action: 'project.delete', decision: 'deny' })
-  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [] })
+  let destroyed = false
+  const fly = { kind: 'fly', branchModel: 'redeploy', async provision() { return { kind: 'fly', providerRef: {} } }, async destroy() { destroyed = true }, async createBranch() { return null }, async deleteBranch() {}, async mintCredentials() { return {} }, async readUsage() { return {} } }
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fly as any] })
   const r = await app.inject({ method: 'DELETE', url: '/projects/projects-0', headers: { authorization: 'Bearer good' } })
   expect(r.statusCode).toBe(403)
+  expect(destroyed).toBe(false)
 })
