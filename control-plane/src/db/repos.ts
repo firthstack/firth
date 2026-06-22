@@ -105,11 +105,16 @@ export class EventsRepo {
   }
 
   async listByProject(owner: string, projectId: string, opts: { branch?: string | null; limit?: number } = {}): Promise<EventRow[]> {
-    let q = this.db.from('events').select().eq('owner', owner).eq('project_id', projectId)
-    if (typeof opts.branch === 'string') q = q.eq('branch_id', opts.branch)
-    const { data, error } = await q
+    const { data, error } = await this.db.from('events').select().eq('owner', owner).eq('project_id', projectId)
     if (error) throw error
-    const rows = (data ?? []) as EventRow[]
+    let rows = (data ?? []) as EventRow[]
+    // A branch view also includes project-scoped events (branch_id null) — project-level
+    // actions (project.delete, project-scoped secrets, govern.*) apply to every branch, so the
+    // audit trail must surface them. Filter app-side (the QueryBuilder has no OR / IS-NULL chain).
+    if (typeof opts.branch === 'string') {
+      const branch = opts.branch
+      rows = rows.filter((r) => r.branch_id === branch || r.branch_id == null)
+    }
     // newest-first; app-side because the fake (and v1) don't use SQL ORDER/LIMIT. Pagination is a follow-up.
     const sorted = [...rows].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
     return sorted.slice(0, opts.limit ?? 50)
