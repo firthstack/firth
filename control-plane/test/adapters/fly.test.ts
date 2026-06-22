@@ -88,6 +88,8 @@ describe('FlyAdapter.deploy', () => {
     expect(body.config.env.DATABASE_URL).toBe('postgresql://c')
     expect(body.config.guest).toEqual({ cpu_kind: 'shared', cpus: 1, memory_mb: 256 })
     expect(body.config.services[0].internal_port).toBe(80)
+    expect(body.config.services[0].autostop).toBe('suspend')   // non-default branch env scales to zero
+    expect(body.config.services[0].autostart).toBe(true)
   })
 
   test('exposing a port allocates a shared v4 + dedicated v6 when the app has none', async () => {
