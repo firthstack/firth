@@ -27,7 +27,7 @@ body {
 .firth-panel__title {
   border-bottom: 1px solid var(--border);
   padding: 0.25rem 0.75rem;
-  color: var(--green);
+  color: var(--fg);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -47,8 +47,10 @@ body {
   border: 1px solid var(--border);
   padding: 0.15rem 0.6rem;
   cursor: pointer;
+  transition: background 150ms ease;
 }
 .firth-btn:hover { background: var(--border); }
+.firth-btn:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .firth-btn:disabled { color: var(--fg-dim); cursor: not-allowed; opacity: 0.5; }
 .firth-btn--danger { color: var(--red); }
 .firth-input {
@@ -72,7 +74,7 @@ body {
 }
 .firth-clihint__prompt { user-select: none; }
 .firth-clihint__cmd {
-  color: var(--green);
+  color: var(--fg);
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -84,6 +86,12 @@ body {
   padding: 0.75rem;
   margin: 0.5rem 0;
 }
+
+/* app shell (auth + authenticated views) — centered column matching the homepage */
+.firth-app { max-width: 880px; margin: 0 auto; padding: 2rem 1.5rem; }
+.firth-app__bar { border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; padding-bottom: 0.5rem; }
+.firth-app__brand { color: var(--fg); letter-spacing: 0.2em; text-transform: lowercase; }
+@media (max-width: 600px) { .firth-app { padding: 1.5rem 1rem; } }
 
 /* homepage / landing */
 .firth-home { max-width: 820px; margin: 0 auto; padding: 3rem 1.5rem; }
@@ -104,12 +112,12 @@ body {
 .firth-home__features td { padding: 0.28rem 0.9rem 0.28rem 0; vertical-align: top; line-height: 1.5; }
 .firth-home__feat-name { color: var(--fg); white-space: nowrap; }
 .firth-home__hint { margin: 0.5rem 0 0; }
-.firth-home__hint code { color: var(--green); }
+.firth-home__hint code { color: var(--fg); }
 
 /* ── homepage refine (command-hero) ───────────────────────────── */
 .firth-home__wordmark { text-align: center; margin-bottom: 2.25rem; }
 .firth-home__mark {
-  color: var(--green);
+  color: var(--fg);
   font-weight: 700;
   letter-spacing: 0.35em;
   text-transform: lowercase;
@@ -120,18 +128,19 @@ body {
   border-bottom: 1px solid var(--border);
 }
 .firth-home__cmd { margin: 0 0 1.5rem; line-height: 1.75; font-size: 1.05rem; }
-.firth-home__ok { color: var(--green); }
+.firth-home__ok { color: var(--fg-dim); }
 .firth-home__headline {
-  font-size: 2rem;
+  font-size: 2.1rem;
   font-weight: 700;
   color: var(--fg);
   margin: 0 0 0.75rem;
-  line-height: 1.25;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 .firth-home__sub { margin: 0 0 1.5rem; line-height: 1.5; }
 .firth-home__cta-hint { margin-left: 1rem; }
 .firth-home__cmd-cell {
-  color: var(--green);
+  color: var(--fg);
   white-space: nowrap;
   padding: 0.1rem 0.75rem 0.1rem 0;
   vertical-align: top;
@@ -146,7 +155,7 @@ body {
    lowercase (the shared panel title is uppercased) so the prompts read as commands. */
 .firth-home .firth-panel { margin-bottom: 1.5rem; }
 .firth-home .firth-panel:last-child { margin-bottom: 0; }
-.firth-home .firth-panel__title { text-transform: none; }
+.firth-home .firth-panel__title { text-transform: none; color: var(--fg); letter-spacing: 0.04em; }
 .firth-home .firth-panel__body { padding: 1rem; }
 
 /* Narrow screens: the pillar tags are decorative — drop them rather than overflow */

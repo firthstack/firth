@@ -30,7 +30,7 @@ function Features() {
           <td className="firth-home__pillar"></td>
         </tr>
         <tr>
-          <td className="firth-home__feat-name">• CoW postgres</td>
+          <td className="firth-home__feat-name">• CoW runtime environment</td>
           <td className="firth-dim">copy-on-write branches — full data, isolated, instant</td>
           <td className="firth-home__pillar">← branchable</td>
         </tr>
