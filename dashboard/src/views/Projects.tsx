@@ -12,6 +12,7 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [approval, setApproval] = useState<{ id: string; approvalId: string } | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null)
@@ -33,7 +34,27 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
   async function remove(id: string) {
     if (busy) return
     setConfirmId(null); setBusy(true); setDeletingId(id); setError(null)
-    try { await api.deleteProject(id); await refresh() }
+    try {
+      const res = await api.deleteProject(id)
+      // project.delete is gated by Govern policy → 202 with an approvalId instead of a teardown.
+      // Surface an inline approve step rather than silently leaving the project in place.
+      if (res?.status === 'approval_required') { setApproval({ id, approvalId: res.approvalId }); return }
+      await refresh()
+    }
+    catch (err) { setError(err instanceof Error ? err.message : 'failed to delete project') }
+    finally { setBusy(false); setDeletingId(null) }
+  }
+
+  async function approveAndDelete() {
+    if (busy || !approval) return
+    const { id, approvalId } = approval
+    setApproval(null); setBusy(true); setDeletingId(id); setError(null)
+    try {
+      await api.approve(id, approvalId)
+      const res = await api.deleteProject(id) // gate now consumes the grant and proceeds
+      if (res?.status === 'approval_required') { setApproval({ id, approvalId: res.approvalId }); return }
+      await refresh()
+    }
     catch (err) { setError(err instanceof Error ? err.message : 'failed to delete project') }
     finally { setBusy(false); setDeletingId(null) }
   }
@@ -70,6 +91,15 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
           onConfirm={() => remove(confirmId)}
           onCancel={() => setConfirmId(null)}
         />
+      )}
+      {approval && (
+        <div className="firth-confirm" role="alertdialog" aria-label="approval required">
+          <p><span aria-hidden="true">🔒</span> project.delete requires approval (Govern policy). approve and delete now?</p>
+          <Row>
+            <TButton className="firth-btn--danger" onClick={approveAndDelete} disabled={busy}>[approve &amp; delete]</TButton>
+            <TButton onClick={() => setApproval(null)} disabled={busy}>[cancel]</TButton>
+          </Row>
+        </div>
       )}
     </Panel>
   )
