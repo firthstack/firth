@@ -1,4 +1,4 @@
-import { Panel, Row, TButton } from '../ui/Terminal'
+import { Panel, TButton } from '../ui/Terminal'
 
 function Hero({ onGetStarted }: { onGetStarted: () => void }) {
   return (
@@ -12,10 +12,10 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
       <p className="firth-home__sub firth-dim">
         // branch your backend like code · audit &amp; gate agent actions at the credential seam
       </p>
-      <Row>
+      <div className="firth-home__cta">
         <TButton onClick={onGetStarted}>[ get started → ]</TButton>
         <span className="firth-home__cta-hint firth-dim">$ npm i -g firth</span>
-      </Row>
+      </div>
     </section>
   )
 }
