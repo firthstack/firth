@@ -29,12 +29,12 @@ describe('App', () => {
   it('with no restored session renders the Home landing page', async () => {
     render(<App auth={fakeAuth()} makeApi={makeApi()} />)
     // Home is shown first (not AuthScreen)
-    expect(await screen.findByText(/a builder platform for agents/i)).toBeInTheDocument()
+    expect(await screen.findByText(/branchable & governable infrastructure for agents/i)).toBeInTheDocument()
   })
 
   it('clicking get started on Home shows the AuthScreen', async () => {
     render(<App auth={fakeAuth()} makeApi={makeApi()} />)
-    await screen.findByText(/a builder platform for agents/i)
+    await screen.findByText(/branchable & governable infrastructure for agents/i)
     await userEvent.click(screen.getByRole('button', { name: /get started/i }))
     // AuthScreen is now shown
     expect(await screen.findByText(/firth \/\/ access/i)).toBeInTheDocument()
@@ -42,17 +42,17 @@ describe('App', () => {
 
   it('back button in AuthScreen returns to Home', async () => {
     render(<App auth={fakeAuth()} makeApi={makeApi()} />)
-    await screen.findByText(/a builder platform for agents/i)
+    await screen.findByText(/branchable & governable infrastructure for agents/i)
     await userEvent.click(screen.getByRole('button', { name: /get started/i }))
     await screen.findByText(/firth \/\/ access/i)
     await userEvent.click(screen.getByRole('button', { name: /back/i }))
-    expect(await screen.findByText(/a builder platform for agents/i)).toBeInTheDocument()
+    expect(await screen.findByText(/branchable & governable infrastructure for agents/i)).toBeInTheDocument()
   })
 
   it('after sign-in renders the Projects view', async () => {
     render(<App auth={fakeAuth()} makeApi={makeApi()} />)
     // navigate to auth
-    await screen.findByText(/a builder platform for agents/i)
+    await screen.findByText(/branchable & governable infrastructure for agents/i)
     await userEvent.click(screen.getByRole('button', { name: /get started/i }))
     await screen.findByText(/firth \/\/ access/i)
     await userEvent.type(screen.getByLabelText(/email/i), 'a@b.co')
@@ -68,7 +68,7 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', { name: /logout/i }))
     expect(auth.signOut).toHaveBeenCalled()
     // returns to Home, not AuthScreen
-    expect(await screen.findByText(/a builder platform for agents/i)).toBeInTheDocument()
+    expect(await screen.findByText(/branchable & governable infrastructure for agents/i)).toBeInTheDocument()
   })
 
   it('a 401 from the api returns to the Home landing page', async () => {
@@ -76,6 +76,6 @@ describe('App', () => {
     const auth = fakeAuth({ restore: vi.fn(async () => ({ user, token: 'tok-1' })) })
     render(<App auth={auth} makeApi={makeApi(list)} />)
     // after 401, lands on Home
-    expect(await screen.findByText(/a builder platform for agents/i)).toBeInTheDocument()
+    expect(await screen.findByText(/branchable & governable infrastructure for agents/i)).toBeInTheDocument()
   })
 })

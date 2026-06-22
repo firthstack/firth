@@ -4,20 +4,25 @@ import userEvent from '@testing-library/user-event'
 import { Home } from './Home'
 
 describe('Home', () => {
-  it('renders the FIRTH banner', () => {
+  it('renders the firth wordmark', () => {
     render(<Home onGetStarted={vi.fn()} />)
-    // The ASCII banner contains the word FIRTH
     expect(screen.getByTestId('firth-banner')).toBeInTheDocument()
   })
 
-  it('renders the tagline', () => {
+  it('leads with the branchable & governable positioning', () => {
     render(<Home onGetStarted={vi.fn()} />)
-    expect(screen.getByText(/a builder platform for agents/i)).toBeInTheDocument()
+    expect(screen.getByText(/branchable & governable infrastructure for agents/i)).toBeInTheDocument()
   })
 
-  it('renders feature lines from the faux terminal', () => {
+  it('renders the core features incl. CoW postgres', () => {
     render(<Home onGetStarted={vi.fn()} />)
-    expect(screen.getByText(/unified secrets/i)).toBeInTheDocument()
+    expect(screen.getByText('• CoW postgres')).toBeInTheDocument()
+  })
+
+  it('renders the how-it-works lifecycle', () => {
+    render(<Home onGetStarted={vi.fn()} />)
+    expect(screen.getByText('$ firth --how')).toBeInTheDocument()
+    expect(screen.getByText(/firth branch create/i)).toBeInTheDocument()
   })
 
   it('shows how to install the firth cli', () => {
