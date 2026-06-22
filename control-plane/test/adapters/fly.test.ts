@@ -43,6 +43,20 @@ describe('FlyAdapter', () => {
     await expect(adapter.provision('x')).rejects.not.toThrow(/fly_tok/)
   })
 
+  test('call() retries a transient 5xx, then succeeds', async () => {
+    let n = 0
+    const http: HttpClient = async () => {
+      n++
+      return n === 1
+        ? { status: 503, json: async () => ({}), text: async () => 'no capacity in iad' }
+        : { status: 201, json: async () => ({}), text: async () => '{}' }
+    }
+    const adapter = new FlyAdapter('fly_tok', 'firth-org', http, { retry: { baseMs: 1 } })
+    const handle = await adapter.provision('x') // first attempt 503 -> retried -> 201
+    expect(handle.kind).toBe('fly')
+    expect(n).toBe(2)
+  })
+
   test('createBranch returns null; mintCredentials and readUsage are empty', async () => {
     const { http } = fakeHttp([])
     const adapter = new FlyAdapter('fly_tok', 'firth-org', http)

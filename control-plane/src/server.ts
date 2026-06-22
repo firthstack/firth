@@ -43,6 +43,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (err instanceof NotFoundError) return reply.code(404).send({ error: err.message })
     if (err instanceof ConflictError) return reply.code(409).send({ error: err.message })
     if (err instanceof ForbiddenError) return reply.code(403).send({ error: err.message })
+    // Log the real error server-side (clients still get only the generic string) so masked 500s are debuggable.
+    console.error('unhandled error -> 500:', err)
     return reply.code(500).send({ error: 'internal error' })
   })
 
