@@ -22,72 +22,65 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
 
 function Features() {
   return (
-    <div className="firth-home__block">
-      <span className="firth-dim">$ firth --features</span>
-      <table className="firth-home__features">
-        <tbody>
-          <tr>
-            <td className="firth-home__feat-name">• provision</td>
-            <td className="firth-dim">postgres · storage · compute — one command, creds → ./.env</td>
-            <td className="firth-home__pillar"></td>
-          </tr>
-          <tr>
-            <td className="firth-home__feat-name">• CoW postgres</td>
-            <td className="firth-dim">copy-on-write branches — full data, isolated, instant</td>
-            <td className="firth-home__pillar">← branchable</td>
-          </tr>
-          <tr>
-            <td className="firth-home__feat-name">• govern + audit</td>
-            <td className="firth-dim">every action on the timeline; policy-gate deletes, deploys &amp; secret reads</td>
-            <td className="firth-home__pillar">← governable</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <table className="firth-home__features">
+      <tbody>
+        <tr>
+          <td className="firth-home__feat-name">• provision</td>
+          <td className="firth-dim">postgres · storage · compute — one command, creds → ./.env</td>
+          <td className="firth-home__pillar"></td>
+        </tr>
+        <tr>
+          <td className="firth-home__feat-name">• CoW postgres</td>
+          <td className="firth-dim">copy-on-write branches — full data, isolated, instant</td>
+          <td className="firth-home__pillar">← branchable</td>
+        </tr>
+        <tr>
+          <td className="firth-home__feat-name">• govern + audit</td>
+          <td className="firth-dim">every action on the timeline; policy-gate deletes, deploys &amp; secret reads</td>
+          <td className="firth-home__pillar">← governable</td>
+        </tr>
+      </tbody>
+    </table>
   )
 }
 
 function HowItWorks() {
   return (
-    <div className="firth-home__block">
-      <span className="firth-dim">$ firth --how</span>
-      <table className="firth-home__features">
-        <tbody>
-          <tr>
-            <td className="firth-home__feat-name">1. provision</td>
-            <td className="firth-home__cmd-cell">firth project create</td>
-            <td className="firth-dim">db · storage · compute, creds in ./.env</td>
-          </tr>
-          <tr>
-            <td className="firth-home__feat-name">2. branch</td>
-            <td className="firth-home__cmd-cell">firth branch create</td>
-            <td className="firth-dim">isolated CoW postgres + fresh compute (storage shared)</td>
-          </tr>
-          <tr>
-            <td className="firth-home__feat-name">3. deploy</td>
-            <td className="firth-home__cmd-cell">firth deploy</td>
-            <td className="firth-dim">ship your container to the branch's compute</td>
-          </tr>
-          <tr>
-            <td className="firth-home__feat-name">4. observe</td>
-            <td className="firth-home__cmd-cell">firth events</td>
-            <td className="firth-dim">agent actions ↔ resource side-effects, per branch</td>
-          </tr>
-          <tr>
-            <td className="firth-home__feat-name">5. govern</td>
-            <td className="firth-home__cmd-cell">firth policy / approve</td>
-            <td className="firth-dim">gate deletes, deploys &amp; secret reads; one-shot approvals</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <table className="firth-home__features">
+      <tbody>
+        <tr>
+          <td className="firth-home__feat-name">1. provision</td>
+          <td className="firth-home__cmd-cell">firth project create</td>
+          <td className="firth-dim">db · storage · compute, creds in ./.env</td>
+        </tr>
+        <tr>
+          <td className="firth-home__feat-name">2. branch</td>
+          <td className="firth-home__cmd-cell">firth branch create</td>
+          <td className="firth-dim">isolated CoW postgres + fresh compute (storage shared)</td>
+        </tr>
+        <tr>
+          <td className="firth-home__feat-name">3. deploy</td>
+          <td className="firth-home__cmd-cell">firth deploy</td>
+          <td className="firth-dim">ship your container to the branch's compute</td>
+        </tr>
+        <tr>
+          <td className="firth-home__feat-name">4. observe</td>
+          <td className="firth-home__cmd-cell">firth events</td>
+          <td className="firth-dim">agent actions ↔ resource side-effects, per branch</td>
+        </tr>
+        <tr>
+          <td className="firth-home__feat-name">5. govern</td>
+          <td className="firth-home__cmd-cell">firth policy / approve</td>
+          <td className="firth-dim">gate deletes, deploys &amp; secret reads; one-shot approvals</td>
+        </tr>
+      </tbody>
+    </table>
   )
 }
 
 function Install() {
   return (
-    <div className="firth-home__block">
-      <span className="firth-dim">$ firth --install</span>
+    <>
       <table className="firth-home__features">
         <tbody>
           <tr>
@@ -107,7 +100,7 @@ function Install() {
       <p className="firth-dim firth-home__hint">
         no install? <code>npx firth --help</code>. docs: <code>firth &lt;cmd&gt; --help</code>
       </p>
-    </div>
+    </>
   )
 }
 
@@ -120,13 +113,9 @@ export function Home({ onGetStarted }: { onGetStarted: () => void }) {
 
       <Hero onGetStarted={onGetStarted} />
 
-      <Panel title="firth">
-        <div className="firth-home__session">
-          <Features />
-          <HowItWorks />
-          <Install />
-        </div>
-      </Panel>
+      <Panel title="$ firth --features"><Features /></Panel>
+      <Panel title="$ firth --how"><HowItWorks /></Panel>
+      <Panel title="$ firth --install"><Install /></Panel>
     </div>
   )
 }
