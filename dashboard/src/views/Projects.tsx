@@ -9,6 +9,7 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
@@ -30,9 +31,11 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
   }
 
   async function remove(id: string) {
-    setConfirmId(null); setError(null)
+    if (busy) return
+    setConfirmId(null); setBusy(true); setDeletingId(id); setError(null)
     try { await api.deleteProject(id); await refresh() }
     catch (err) { setError(err instanceof Error ? err.message : 'failed to delete project') }
+    finally { setBusy(false); setDeletingId(null) }
   }
 
   return (
@@ -58,7 +61,7 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
           <span className="firth-dim">{p.status}</span>
           <span className="firth-dim">{p.created_at ?? ''}</span>
           <TButton onClick={() => onOpen(p.id)}>[open]</TButton>
-          <TButton className="firth-btn--danger" onClick={() => setConfirmId(p.id)}>[delete]</TButton>
+          <TButton className="firth-btn--danger" onClick={() => setConfirmId(p.id)} disabled={busy}>{deletingId === p.id ? 'deleting…' : '[delete]'}</TButton>
         </Row>
       ))}
       {confirmId && (

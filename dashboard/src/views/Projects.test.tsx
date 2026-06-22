@@ -69,6 +69,23 @@ describe('Projects', () => {
     expect(deleteProject).toHaveBeenCalledWith('p1')
   })
 
+  it('disables delete + shows deleting… while a delete is in flight, ignoring repeat clicks', async () => {
+    let finish!: () => void
+    const deleteProject = vi.fn(() => new Promise<unknown>((res) => { finish = () => res({}) }))
+    const api = fakeApi({ deleteProject })
+    render(<Projects api={api} onOpen={vi.fn()} />)
+    await screen.findByText('alpha')
+    await userEvent.click(screen.getByRole('button', { name: /^\[delete\]$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /confirm/i }))
+    expect(deleteProject).toHaveBeenCalledTimes(1)
+    const btn = screen.getByRole('button', { name: /deleting/i })
+    expect(btn).toBeDisabled()
+    await userEvent.click(btn) // repeat click while deleting must be a no-op
+    expect(deleteProject).toHaveBeenCalledTimes(1)
+    finish()
+    await waitFor(() => expect(deleteProject).toHaveBeenCalledTimes(1))
+  })
+
   it('shows the firth project create cli hint', async () => {
     render(<Projects api={fakeApi()} onOpen={vi.fn()} />)
     await screen.findByText('alpha')
