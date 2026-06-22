@@ -61,7 +61,7 @@ function HowItWorks() {
           <tr>
             <td className="firth-home__feat-name">2. branch</td>
             <td className="firth-home__cmd-cell">firth branch create</td>
-            <td className="firth-dim">isolated postgres + fresh compute (storage shared)</td>
+            <td className="firth-dim">isolated CoW postgres + fresh compute (storage shared)</td>
           </tr>
           <tr>
             <td className="firth-home__feat-name">3. deploy</td>

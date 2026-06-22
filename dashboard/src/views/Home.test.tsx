@@ -16,7 +16,7 @@ describe('Home', () => {
 
   it('renders the core features incl. CoW postgres', () => {
     render(<Home onGetStarted={vi.fn()} />)
-    expect(screen.getByText(/CoW postgres/i)).toBeInTheDocument()
+    expect(screen.getByText('• CoW postgres')).toBeInTheDocument()
   })
 
   it('renders the how-it-works lifecycle', () => {
