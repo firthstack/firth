@@ -114,6 +114,22 @@ describe('ProjectDetail', () => {
     expect(deleteBranch).toHaveBeenCalledWith('p1', 'b2')
   })
 
+  it('disables branch delete + shows deleting… while in flight, ignoring repeat clicks', async () => {
+    let finish!: () => void
+    const deleteBranch = vi.fn(() => new Promise<unknown>((res) => { finish = () => res({}) }))
+    render(<ProjectDetail api={fakeApi({ deleteBranch })} projectId="p1" onBack={vi.fn()} />)
+    await screen.findByText('dev')
+    await userEvent.click(screen.getByRole('button', { name: /^\[delete\]$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /confirm/i }))
+    expect(deleteBranch).toHaveBeenCalledTimes(1)
+    const btn = screen.getByRole('button', { name: /deleting/i })
+    expect(btn).toBeDisabled()
+    await userEvent.click(btn) // repeat click while deleting must be a no-op
+    expect(deleteBranch).toHaveBeenCalledTimes(1)
+    finish()
+    await waitFor(() => expect(deleteBranch).toHaveBeenCalledTimes(1))
+  })
+
   it('creating a branch calls createBranch', async () => {
     const createBranch = vi.fn(async () => ({}))
     const getProject = vi.fn().mockResolvedValue(detail)

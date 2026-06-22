@@ -241,6 +241,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [deletingBranch, setDeletingBranch] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [from, setFrom] = useState('main')
   const [confirmBranch, setConfirmBranch] = useState<string | null>(null)
@@ -287,9 +288,11 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
   }
 
   async function removeBranch(branchId: string) {
-    setConfirmBranch(null); setError(null)
+    if (busy) return
+    setConfirmBranch(null); setBusy(true); setDeletingBranch(branchId); setError(null)
     try { await api.deleteBranch(projectId, branchId); await refresh() }
     catch (err) { setError(err instanceof Error ? err.message : 'failed to delete branch') }
+    finally { setBusy(false); setDeletingBranch(null) }
   }
 
   const neonResource = detail?.resources.find((r) => r.kind === 'neon')
@@ -338,7 +341,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
                 <span className="firth-dim">{b.neon_branch_ref ?? '-'}</span>
                 <span className="firth-dim">{b.status}</span>
                 {!b.is_default && (
-                  <TButton className="firth-btn--danger" onClick={() => setConfirmBranch(b.id)}>[delete]</TButton>
+                  <TButton className="firth-btn--danger" onClick={() => setConfirmBranch(b.id)} disabled={busy}>{deletingBranch === b.id ? 'deleting…' : '[delete]'}</TButton>
                 )}
               </Row>
             ))}
