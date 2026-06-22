@@ -8,6 +8,7 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [name, setName] = useState('')
   const [confirmId, setConfirmId] = useState<string | null>(null)
 
@@ -21,10 +22,11 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
   useEffect(() => { void refresh() }, [refresh])
 
   async function create() {
-    if (!name.trim()) return
-    setError(null)
+    if (busy || !name.trim()) return
+    setBusy(true); setError(null)
     try { await api.createProject(name.trim()); setName(''); setCreating(false); await refresh() }
     catch (err) { setError(err instanceof Error ? err.message : 'failed to create project') }
+    finally { setBusy(false) }
   }
 
   async function remove(id: string) {
@@ -42,9 +44,9 @@ export function Projects({ api, onOpen }: { api: Api; onOpen: (projectId: string
       {creating && (
         <Row>
           <label htmlFor="new-project-name">name</label>
-          <TInput id="new-project-name" value={name} onChange={(e) => setName(e.target.value)} />
-          <TButton onClick={create}>[ok]</TButton>
-          <TButton onClick={() => { setCreating(false); setName('') }}>[cancel]</TButton>
+          <TInput id="new-project-name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+          <TButton onClick={create} disabled={busy}>{busy ? 'creating…' : '[ok]'}</TButton>
+          <TButton onClick={() => { setCreating(false); setName('') }} disabled={busy}>[cancel]</TButton>
         </Row>
       )}
       {loading && <p className="firth-dim">loading...</p>}

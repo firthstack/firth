@@ -127,6 +127,25 @@ describe('ProjectDetail', () => {
     await waitFor(() => expect(createBranch).toHaveBeenCalledWith('p1', 'feature', 'main'))
   })
 
+  it('disables the branch create button while submitting and ignores a double-click', async () => {
+    const getProject = vi.fn().mockResolvedValue(detail)
+    let finish!: () => void
+    const createBranch = vi.fn(() => new Promise<unknown>((res) => { finish = () => res({}) }))
+    render(<ProjectDetail api={fakeApi({ createBranch, getProject })} projectId="p1" onBack={vi.fn()} />)
+    await screen.findByText('main')
+    await userEvent.click(screen.getByRole('button', { name: /create branch/i }))
+    await userEvent.type(screen.getByLabelText(/^name$/i), 'feature')
+    await userEvent.click(screen.getByRole('button', { name: /^\[ok\]$/i }))
+    // in-flight: the button shows "creating…" and is disabled
+    const btn = screen.getByRole('button', { name: /creating/i })
+    expect(btn).toBeDisabled()
+    expect(createBranch).toHaveBeenCalledTimes(1)
+    await userEvent.click(btn) // second click while submitting must be a no-op
+    expect(createBranch).toHaveBeenCalledTimes(1)
+    finish()
+    await waitFor(() => expect(createBranch).toHaveBeenCalledTimes(1))
+  })
+
   // ---- per-branch compute card ---------------------------------------------
 
   it('compute card renders one entry per fly resource labeled by branch name', async () => {
