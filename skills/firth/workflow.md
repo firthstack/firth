@@ -34,8 +34,5 @@ Firth does **not** merge databases — there is no DB-level merge (diverged Post
 5. `firth branch delete <name> --yes` — tear down the promoted branch's env (Neon branch + Fly app).
 
 ## Gotchas (read before deploying)
-- **Never gate container startup on migrations.** A `CMD` of `migrate && server` means a hung/failed migrate prevents the server from ever starting — the deploy "succeeds" but the URL times out, with nothing in the logs. Run migrations **non-blocking**: `timeout 30 <migrate> || echo skipped; <start-server>`.
-- **The first `firth deploy` often returns `500 internal error`** at the launch step — *after* the image builds + pushes. It's a transient control-plane error, **worse under parallel deploys**, and **no machine is created** (safe to retry). Retry with the printed image ref: `firth deploy --image registry.fly.io/<app>:<tag> --port <n>`.
-- **Capture + use the deploy URL** (`→ https://<app>.fly.dev`). If the app needs to know its own URL (e.g. an auth base URL), derive it at runtime from Fly's `FLY_APP_NAME` so the same image works on every branch.
-- **Unique migration filenames across branches** — two branches both adding `003_*.sql` both apply on main (different files) but the duplicate ordinal is confusing; timestamp or coordinate names.
-- **`branch create` doesn't switch you** — always follow with `firth branch switch <name>` then `firth secrets`, or you'll build against the wrong env.
+- **Never gate container startup on migrations.** A `CMD` of `migrate && server` lets a hung or failed migrate stop the server from ever starting — the deploy "succeeds" but the URL just times out, with nothing in the logs. Run migrations **non-blocking**: `timeout 30 <migrate> || echo skipped; <start-server>`.
+- **If your app needs its own URL** (e.g. an auth base URL), derive it at runtime from Fly's `FLY_APP_NAME` so the same image works on every branch.
