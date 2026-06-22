@@ -38,6 +38,26 @@ describe('Projects', () => {
     expect(await screen.findByText('beta')).toBeInTheDocument()
   })
 
+  it('disables the create button while submitting and ignores a double-click', async () => {
+    const listProjects = vi.fn().mockResolvedValue([])
+    let finish!: () => void
+    const createProject = vi.fn(() => new Promise<unknown>((res) => { finish = () => res({}) }))
+    const api = fakeApi({ listProjects, createProject })
+    render(<Projects api={api} onOpen={vi.fn()} />)
+    await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(1))
+    await userEvent.click(screen.getByRole('button', { name: /create/i }))
+    await userEvent.type(screen.getByLabelText(/name/i), 'beta')
+    await userEvent.click(screen.getByRole('button', { name: /^\[ok\]$/i }))
+    // in-flight: the button now shows "creating…" and is disabled
+    const btn = screen.getByRole('button', { name: /creating/i })
+    expect(btn).toBeDisabled()
+    expect(createProject).toHaveBeenCalledTimes(1)
+    await userEvent.click(btn) // second click while submitting must be a no-op
+    expect(createProject).toHaveBeenCalledTimes(1)
+    finish()
+    await waitFor(() => expect(createProject).toHaveBeenCalledTimes(1))
+  })
+
   it('deleting a project shows a confirm; confirming calls deleteProject', async () => {
     const deleteProject = vi.fn(async () => ({}))
     const api = fakeApi({ deleteProject })

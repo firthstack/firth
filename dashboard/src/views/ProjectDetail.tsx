@@ -240,6 +240,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [name, setName] = useState('')
   const [from, setFrom] = useState('main')
   const [confirmBranch, setConfirmBranch] = useState<string | null>(null)
@@ -278,10 +279,11 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
   useEffect(() => { void refresh() }, [refresh])
 
   async function create() {
-    if (!name.trim()) return
-    setError(null)
+    if (busy || !name.trim()) return
+    setBusy(true); setError(null)
     try { await api.createBranch(projectId, name.trim(), from.trim() || 'main'); setName(''); setFrom('main'); setCreating(false); await refresh() }
     catch (err) { setError(err instanceof Error ? err.message : 'failed to create branch') }
+    finally { setBusy(false) }
   }
 
   async function removeBranch(branchId: string) {
@@ -322,11 +324,11 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
             {creating && (
               <Row>
                 <label htmlFor="branch-name">name</label>
-                <TInput id="branch-name" value={name} onChange={(e) => setName(e.target.value)} />
+                <TInput id="branch-name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
                 <label htmlFor="branch-from">from</label>
-                <TInput id="branch-from" value={from} onChange={(e) => setFrom(e.target.value)} />
-                <TButton onClick={create}>[ok]</TButton>
-                <TButton onClick={() => { setCreating(false); setName(''); setFrom('main') }}>[cancel]</TButton>
+                <TInput id="branch-from" value={from} onChange={(e) => setFrom(e.target.value)} disabled={busy} />
+                <TButton onClick={create} disabled={busy}>{busy ? 'creating…' : '[ok]'}</TButton>
+                <TButton onClick={() => { setCreating(false); setName(''); setFrom('main') }} disabled={busy}>[cancel]</TButton>
               </Row>
             )}
             {detail.branches.map((b) => (
