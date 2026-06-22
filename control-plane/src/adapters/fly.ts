@@ -23,8 +23,8 @@ export class FlyAdapter implements ComputeAdapter {
   constructor(private apiToken: string, private orgSlug: string, private http: HttpClient, opts: { baseUrl?: string; graphqlUrl?: string; retry?: { max?: number; baseMs?: number } } = {}) {
     this.baseUrl = opts.baseUrl ?? FLY_BASE
     this.graphqlUrl = opts.graphqlUrl ?? FLY_GRAPHQL
-    this.retryMax = opts.retry?.max ?? 4
-    this.retryBaseMs = opts.retry?.baseMs ?? 400
+    this.retryMax = opts.retry?.max ?? 6
+    this.retryBaseMs = opts.retry?.baseMs ?? 500
   }
 
   private async call(method: string, path: string, body?: unknown): Promise<any> {
@@ -39,10 +39,12 @@ export class FlyAdapter implements ComputeAdapter {
       if (res.status >= 200 && res.status < 300) return res.json().catch(() => ({}))
       lastStatus = res.status
       lastDetail = await res.text().catch(() => '')
-      // Retry transient Fly errors (429 rate-limit / 5xx capacity or outage) with exponential backoff.
-      // These intermittent machine-create failures are what otherwise surface as a generic control-plane
-      // 500 (worse under parallel deploys). 4xx like 422 are caller errors — fail fast, no retry.
-      if ((res.status === 429 || res.status >= 500) && attempt < this.retryMax) {
+      // Retry transient Fly errors with exponential backoff: 429 (rate limit), 5xx (capacity/outage),
+      // AND the registry-propagation race — a brand-new app's freshly-pushed image 404s as
+      // MANIFEST_UNKNOWN on machine-create until the manifest propagates (surfaces as 400/404, not 5xx).
+      // Other 4xx (e.g. 422) are caller errors — fail fast, no retry.
+      const manifestRace = /MANIFEST_UNKNOWN|manifest unknown|failed to get manifest/i.test(lastDetail)
+      if ((res.status === 429 || res.status >= 500 || manifestRace) && attempt < this.retryMax) {
         await sleep(this.retryBaseMs * 2 ** (attempt - 1) + Math.floor(Math.random() * this.retryBaseMs))
         continue
       }

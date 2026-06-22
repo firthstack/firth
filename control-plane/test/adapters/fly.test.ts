@@ -57,6 +57,20 @@ describe('FlyAdapter', () => {
     expect(n).toBe(2)
   })
 
+  test('call() retries the registry-propagation race (MANIFEST_UNKNOWN, status 400) then succeeds', async () => {
+    let n = 0
+    const http: HttpClient = async () => {
+      n++
+      return n === 1
+        ? { status: 400, json: async () => ({}), text: async () => '{"error":"failed to get manifest ...: MANIFEST_UNKNOWN, manifest unknown"}' }
+        : { status: 201, json: async () => ({}), text: async () => '{}' }
+    }
+    const adapter = new FlyAdapter('fly_tok', 'firth-org', http, { retry: { baseMs: 1 } })
+    const handle = await adapter.provision('x') // 400 MANIFEST_UNKNOWN is transient -> retried -> 201
+    expect(handle.kind).toBe('fly')
+    expect(n).toBe(2)
+  })
+
   test('createBranch returns null; mintCredentials and readUsage are empty', async () => {
     const { http } = fakeHttp([])
     const adapter = new FlyAdapter('fly_tok', 'firth-org', http)
