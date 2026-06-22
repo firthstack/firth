@@ -3,6 +3,7 @@ import type { ComputeAdapter, DeployOpts, DeployResult, HttpClient, ResourceHand
 
 const FLY_BASE = 'https://api.machines.dev/v1'
 const FLY_GRAPHQL = 'https://api.fly.io/graphql' // IP allocation lives only on the GraphQL API, not the Machines API
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 export type FlyRef = { flyApp: string; orgSlug: string }
 
@@ -16,20 +17,38 @@ export class FlyAdapter implements ComputeAdapter {
   readonly branchModel = 'redeploy' as const
   private baseUrl: string
   private graphqlUrl: string
+  private retryMax: number
+  private retryBaseMs: number
 
-  constructor(private apiToken: string, private orgSlug: string, private http: HttpClient, opts: { baseUrl?: string; graphqlUrl?: string } = {}) {
+  constructor(private apiToken: string, private orgSlug: string, private http: HttpClient, opts: { baseUrl?: string; graphqlUrl?: string; retry?: { max?: number; baseMs?: number } } = {}) {
     this.baseUrl = opts.baseUrl ?? FLY_BASE
     this.graphqlUrl = opts.graphqlUrl ?? FLY_GRAPHQL
+    this.retryMax = opts.retry?.max ?? 4
+    this.retryBaseMs = opts.retry?.baseMs ?? 400
   }
 
   private async call(method: string, path: string, body?: unknown): Promise<any> {
-    const res = await this.http(`${this.baseUrl}${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${this.apiToken}`, 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-    if (res.status < 200 || res.status >= 300) throw new Error(`fly ${method} ${path} failed: ${res.status}`)
-    return res.json().catch(() => ({}))
+    let lastStatus = 0
+    let lastDetail = ''
+    for (let attempt = 1; attempt <= this.retryMax; attempt++) {
+      const res = await this.http(`${this.baseUrl}${path}`, {
+        method,
+        headers: { Authorization: `Bearer ${this.apiToken}`, 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+      if (res.status >= 200 && res.status < 300) return res.json().catch(() => ({}))
+      lastStatus = res.status
+      lastDetail = await res.text().catch(() => '')
+      // Retry transient Fly errors (429 rate-limit / 5xx capacity or outage) with exponential backoff.
+      // These intermittent machine-create failures are what otherwise surface as a generic control-plane
+      // 500 (worse under parallel deploys). 4xx like 422 are caller errors — fail fast, no retry.
+      if ((res.status === 429 || res.status >= 500) && attempt < this.retryMax) {
+        await sleep(this.retryBaseMs * 2 ** (attempt - 1) + Math.floor(Math.random() * this.retryBaseMs))
+        continue
+      }
+      break
+    }
+    throw new Error(`fly ${method} ${path} failed: ${lastStatus}${lastDetail ? ` ${lastDetail.slice(0, 300)}` : ''}`)
   }
 
   // Fly IP allocation is only on the GraphQL API, not the Machines API.
