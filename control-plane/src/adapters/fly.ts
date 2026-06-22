@@ -53,17 +53,30 @@ export class FlyAdapter implements ComputeAdapter {
 
   // Fly IP allocation is only on the GraphQL API, not the Machines API.
   private async graphql(query: string, variables: Record<string, unknown>): Promise<any> {
-    const res = await this.http(this.graphqlUrl, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${this.apiToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, variables }),
-    })
-    if (res.status < 200 || res.status >= 300) throw new Error(`fly graphql failed: ${res.status}`)
-    const out = await res.json().catch(() => ({}))
-    if (Array.isArray(out.errors) && out.errors.length > 0) {
-      throw new Error(`fly graphql error: ${out.errors[0]?.message ?? 'unknown'}`)
+    let lastStatus = 0
+    for (let attempt = 1; attempt <= this.retryMax; attempt++) {
+      const res = await this.http(this.graphqlUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.apiToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables }),
+      })
+      if (res.status >= 200 && res.status < 300) {
+        const out = await res.json().catch(() => ({}))
+        if (Array.isArray(out.errors) && out.errors.length > 0) {
+          throw new Error(`fly graphql error: ${out.errors[0]?.message ?? 'unknown'}`)
+        }
+        return out.data ?? {}
+      }
+      lastStatus = res.status
+      // Same transient retry as call(): public-IP allocation runs through GraphQL on a NEW app's first
+      // deploy, so an un-retried 429/5xx here is exactly the deploy-500 that still hit brand-new branches.
+      if ((res.status === 429 || res.status >= 500) && attempt < this.retryMax) {
+        await sleep(this.retryBaseMs * 2 ** (attempt - 1) + Math.floor(Math.random() * this.retryBaseMs))
+        continue
+      }
+      break
     }
-    return out.data ?? {}
+    throw new Error(`fly graphql failed: ${lastStatus}`)
   }
 
   // A Fly app is only reachable on the public internet once it has an IP address; the Machines

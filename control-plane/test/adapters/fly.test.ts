@@ -129,7 +129,7 @@ describe('FlyAdapter.deploy', () => {
       { match: (u, i) => i.method === 'POST' && u.endsWith('/machines'), body: { id: 'm-1' } },
       { match: (u) => u.includes('graphql'), status: 500, body: {} },
     ])
-    const adapter = new FlyAdapter('fly_tok', 'org', http)
+    const adapter = new FlyAdapter('fly_tok', 'org', http, { retry: { baseMs: 1 } })
     const handle = { kind: 'fly' as const, providerRef: { flyApp: 'a', orgSlug: 'o' } }
     await expect(adapter.deploy(handle, { image: 'img', env: {}, port: 8080 })).rejects.toThrow(/fly graphql failed: 500/)
     await expect(adapter.deploy(handle, { image: 'img', env: {}, port: 8080 })).rejects.not.toThrow(/fly_tok/)
