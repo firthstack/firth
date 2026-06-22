@@ -609,6 +609,18 @@ test('approvals: list pending, approve flips to granted', async () => {
   expect(db.tables.approvals[0].status).toBe('granted')
 })
 
+// Regression: the CLI sends `Content-Type: application/json` on the bodyless approve/deny
+// POSTs. Fastify's default JSON parser rejected the empty body (400 → surfaced as 500),
+// making approve/deny unusable from the CLI. The empty-body-tolerant parser must accept it.
+test('approve with Content-Type: application/json and an empty body still succeeds (CLI shape)', async () => {
+  const db = fakeData()
+  db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'p1', action: 'secrets.read', status: 'pending', requested_at: 'now', decided_at: null })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const ap = await app.inject({ method: 'POST', url: '/projects/p1/approvals/a1/approve', headers: { authorization: 'Bearer good', 'content-type': 'application/json' } })
+  expect(ap.statusCode).toBe(200)
+  expect(db.tables.approvals[0].status).toBe('granted')
+})
+
 test('approvals: deny flips to denied + emits govern.denied', async () => {
   const db = fakeData()
   db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'p1', action: 'project.delete', status: 'pending', requested_at: 'now', decided_at: null })
