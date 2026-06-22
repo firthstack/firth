@@ -123,6 +123,10 @@ export class FlyAdapter implements ComputeAdapter {
       config.services = [{
         protocol: 'tcp',
         internal_port: opts.port,
+        // Branch/preview envs scale to zero (suspend snapshots RAM for fast wake) and auto-start on
+        // request; the default branch (production) stays always-on. Cuts cost on idle per-branch envs.
+        autostop: opts.persistent ? 'off' : 'suspend',
+        autostart: true,
         ports: [{ port: 443, handlers: ['tls', 'http'] }, { port: 80, handlers: ['http'] }],
       }]
     }

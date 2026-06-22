@@ -33,7 +33,7 @@ export class DeployService {
     }
 
     const handle: ResourceHandle = { kind: 'fly', providerRef: resource.provider_ref }
-    return fly.deploy(handle, { image: opts.image, env, port: opts.port })
+    return fly.deploy(handle, { image: opts.image, env, port: opts.port, persistent: target.is_default })
   }
 
   async mintDeployToken(owner: string, projectId: string, opts: { from?: string }): Promise<{ token: string; expirySeconds: number; flyApp: string }> {

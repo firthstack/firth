@@ -20,7 +20,7 @@ export interface ProviderAdapter {
   readUsage(handle: ResourceHandle): Promise<UsageSnapshot>
 }
 
-export type DeployOpts = { image: string; env: Record<string, string>; port?: number }
+export type DeployOpts = { image: string; env: Record<string, string>; port?: number; persistent?: boolean }
 export type DeployResult = { machineId: string; url: string }
 
 export interface ComputeAdapter extends ProviderAdapter {
