@@ -138,7 +138,8 @@ body {
   letter-spacing: -0.02em;
 }
 .firth-home__sub { margin: 0 0 1.5rem; line-height: 1.5; }
-.firth-home__cta-hint { margin-left: 1rem; }
+.firth-home__cta { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; }
+.firth-home__cta-hint { margin-left: 0.5rem; }
 .firth-home__cmd-cell {
   color: var(--fg);
   white-space: nowrap;
