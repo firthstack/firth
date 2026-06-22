@@ -12,6 +12,7 @@ function fakeApi(overrides: Partial<Api> = {}): Api {
     deleteProject: vi.fn(async () => ({})),
     createBranch: vi.fn(),
     deleteBranch: vi.fn(),
+    approve: vi.fn(async () => ({})),
     ...overrides,
   } as unknown as Api
 }
@@ -84,6 +85,36 @@ describe('Projects', () => {
     expect(deleteProject).toHaveBeenCalledTimes(1)
     finish()
     await waitFor(() => expect(deleteProject).toHaveBeenCalledTimes(1))
+  })
+
+  it('a gated delete (approval_required) pops an approve prompt instead of silently doing nothing', async () => {
+    const deleteProject = vi.fn(async () => ({ status: 'approval_required', approvalId: 'ap1', action: 'project.delete' }))
+    const api = fakeApi({ deleteProject })
+    render(<Projects api={api} onOpen={vi.fn()} />)
+    await screen.findByText('alpha')
+    await userEvent.click(screen.getByRole('button', { name: /^\[delete\]$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /confirm/i }))
+    expect(deleteProject).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText(/requires approval/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /approve & delete/i })).toBeInTheDocument()
+  })
+
+  it('approve & delete approves the request then retries the delete', async () => {
+    const deleteProject = vi.fn()
+      .mockResolvedValueOnce({ status: 'approval_required', approvalId: 'ap1', action: 'project.delete' })
+      .mockResolvedValueOnce({ project: {}, teardown: {} })
+    const approve = vi.fn(async () => ({}))
+    const listProjects = vi.fn()
+      .mockResolvedValueOnce([{ id: 'p1', name: 'alpha', status: 'active' }])
+      .mockResolvedValue([])
+    const api = fakeApi({ deleteProject, approve, listProjects })
+    render(<Projects api={api} onOpen={vi.fn()} />)
+    await screen.findByText('alpha')
+    await userEvent.click(screen.getByRole('button', { name: /^\[delete\]$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /confirm/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /approve & delete/i }))
+    await waitFor(() => expect(approve).toHaveBeenCalledWith('p1', 'ap1'))
+    expect(deleteProject).toHaveBeenCalledTimes(2)
   })
 
   it('shows the firth project create cli hint', async () => {
