@@ -15,7 +15,7 @@ Per-branch loop:
 ## Running multiple agents in parallel (encouraged)
 Per-branch isolation makes parallel agent development the natural mode: each agent gets its **own git worktree + its own firth branch**, so they build, deploy, and test concurrently with zero collision.
 
-**REQUIRED SUB-SKILLS:** superpowers:using-git-worktrees (a worktree per task) + superpowers:dispatching-parallel-agents (run them at once).
+The commands below are self-contained — no extra tooling required. *(Optional: if your coding agent has the **superpowers** skills, `superpowers:using-git-worktrees` and `superpowers:dispatching-parallel-agents` go deeper on the worktree/subagent mechanics — an enhancement, not a dependency.)*
 
 Bind each worktree to a firth branch **before** dispatching the agent:
 ```
