@@ -73,15 +73,17 @@ export default function App({
   if (!ready) return <p className="firth-dim">loading...</p>
   if (!token) {
     if (landing === 'home') return <Home onGetStarted={() => setLanding('auth')} />
-    return <AuthScreen auth={auth} onAuthed={(t, u) => { setToken(t); setUser(u) }} onBack={() => setLanding('home')} />
+    return <div className="firth-app"><AuthScreen auth={auth} onAuthed={(t, u) => { setToken(t); setUser(u) }} onBack={() => setLanding('home')} /></div>
   }
   return (
-    <div>
-      <Row>
-        <span style={{ flex: 1 }}>firth</span>
-        <span className="firth-dim">{user?.email}</span>
-        <TButton onClick={logout}>[logout]</TButton>
-      </Row>
+    <div className="firth-app">
+      <header className="firth-app__bar">
+        <Row>
+          <span className="firth-app__brand" style={{ flex: 1 }}>firth</span>
+          <span className="firth-dim">{user?.email}</span>
+          <TButton onClick={logout}>[logout]</TButton>
+        </Row>
+      </header>
       {view.name === 'projects' && <Projects api={api} onOpen={(projectId) => setView({ name: 'detail', projectId })} />}
       {view.name === 'detail' && <ProjectDetail api={api} projectId={view.projectId} onBack={() => setView({ name: 'projects' })} />}
     </div>

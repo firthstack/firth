@@ -14,9 +14,9 @@ describe('Home', () => {
     expect(screen.getByText(/branchable & governable infrastructure for agents/i)).toBeInTheDocument()
   })
 
-  it('renders the core features incl. CoW postgres', () => {
+  it('renders the core features incl. CoW runtime environment', () => {
     render(<Home onGetStarted={vi.fn()} />)
-    expect(screen.getByText('• CoW postgres')).toBeInTheDocument()
+    expect(screen.getByText('• CoW runtime environment')).toBeInTheDocument()
   })
 
   it('renders the how-it-works lifecycle', () => {
