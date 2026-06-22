@@ -41,7 +41,21 @@ export function createControlPlaneAuth(apiUrl: string, fetcher: typeof fetch = (
         const { user } = await call('/auth/me', { method: 'GET', headers: { Authorization: `Bearer ${token}` } })
         return user ? { user, token } : null
       } catch {
-        localStorage.removeItem(TOKEN_KEY)
+        // The stored access token is likely expired (15-min TTL). Try a silent refresh
+        // with the 7-day refresh token before forcing a re-login — otherwise reopening
+        // the dashboard after 15 min always lands on the login screen.
+        const refreshToken = localStorage.getItem(REFRESH_KEY)
+        if (refreshToken) {
+          try {
+            const refreshed = await call('/auth/refresh', { method: 'POST', body: JSON.stringify({ refreshToken }) })
+            if (refreshed?.token) {
+              setStoredTokens({ token: refreshed.token, refreshToken: refreshed.refreshToken })
+              const { user } = await call('/auth/me', { method: 'GET', headers: { Authorization: `Bearer ${refreshed.token}` } })
+              if (user) return { user, token: refreshed.token }
+            }
+          } catch { /* refresh also failed — refresh token expired/invalid; fall through */ }
+        }
+        clearStoredTokens()
         return null
       }
     },
