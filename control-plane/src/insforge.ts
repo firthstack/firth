@@ -60,14 +60,26 @@ export type AuthApi = { getCurrentUser(): Promise<{ id: string } | null> }
  * who it belongs to. Uses a per-call client seeded with `accessToken` so
  * the request is authorised as that user, not as the admin key.
  *
- * Returns `{ id }` on success, `null` when the token is valid but carries
- * no user (shouldn't happen in practice), and throws on network / SDK errors
- * so a transient failure is never silently misread as "no user".
+ * Returns `{ id }` on success and `null` when the token is invalid/expired
+ * (an auth failure, HTTP 401/403) so the caller answers 401 and the client
+ * can refresh-and-retry. A genuine network / SDK failure (no auth status)
+ * is re-thrown so a transient outage is never silently misread as "no user".
  */
-export async function verifyToken(cfg: FirthConfig, token: string): Promise<{ id: string } | null> {
-  const c = createClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey, accessToken: token })
+export async function verifyToken(
+  cfg: FirthConfig,
+  token: string,
+  makeClient: typeof createClient = createClient,
+): Promise<{ id: string } | null> {
+  const c = makeClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey, accessToken: token })
   const { data, error } = await c.auth.getCurrentUser()
-  if (error) throw error // don't let a network/SDK failure read as "no user"
+  if (error) {
+    // Invalid/expired token → InsForge replies 401 (or 403). Treat as "no user"
+    // → the route returns 401 → CLI/dashboard refresh the token and retry.
+    // Any non-auth error (network, 5xx) must still throw → 500, never a false 401.
+    const status = (error as { statusCode?: number }).statusCode
+    if (status === 401 || status === 403) return null
+    throw error
+  }
   return data?.user ? { id: data.user.id } : null
 }
 

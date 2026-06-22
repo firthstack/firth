@@ -25,6 +25,16 @@ export type ServerDeps = {
 export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: false })
 
+  // Fastify's default JSON parser rejects an empty body when Content-Type is
+  // application/json. Bodyless POSTs (e.g. approvals approve/deny) legitimately send
+  // that header with no body, so treat an empty body as `undefined` instead of a 400
+  // (which our handler would surface as a 500). Routes needing a body still validate it.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+    const s = (body as string).trim()
+    if (s === '') return done(null, undefined)
+    try { done(null, JSON.parse(s)) } catch (e) { done(e as Error) }
+  })
+
   app.setErrorHandler((err, _req, reply) => {
     // UnauthorizedError always sends the fixed string 'unauthorized'. Typed errors (NotFound/Conflict/Forbidden)
     // send err.message, which is author-controlled and never user input or secrets — never the stack. The 500

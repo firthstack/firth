@@ -119,6 +119,20 @@ test('EventsRepo.record inserts; listByProject returns newest-first, limited, br
   expect(lim).toHaveLength(1)
 })
 
+test('EventsRepo.listByProject branch view includes project-scoped (null-branch) events, excludes other branches', async () => {
+  const db = fakeDb()
+  const repo = new EventsRepo(db as any)
+  await repo.record({ project_id: 'p', owner: 'o', branch_id: null, source: 'resource', kind: 'govern.approved', payload: {} }) // project-scoped
+  await repo.record({ project_id: 'p', owner: 'o', branch_id: 'b1', source: 'resource', kind: 'deploy', payload: {} })          // branch b1
+  await repo.record({ project_id: 'p', owner: 'o', branch_id: 'b2', source: 'resource', kind: 'branch.delete', payload: {} })   // other branch b2
+  const view = await repo.listByProject('o', 'p', { branch: 'b1' })
+  const kinds = view.map((e) => e.kind)
+  expect(kinds).toContain('govern.approved') // project-scoped event surfaces in the branch view
+  expect(kinds).toContain('deploy')          // the branch's own event
+  expect(kinds).not.toContain('branch.delete') // a different branch's event stays out
+  expect(view).toHaveLength(2)
+})
+
 // ─── New archived_at tests (from e1dd283) ────────────────────────────────────
 
 describe('ProjectsRepo archive/find/list', () => {
