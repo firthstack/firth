@@ -79,6 +79,40 @@ describe('createControlPlaneAuth', () => {
     expect(localStorage.getItem('firth_token')).toBeNull()
   })
 
+  it('restore silently refreshes an expired access token with the refresh token', async () => {
+    localStorage.setItem('firth_token', 'expired-tok')
+    localStorage.setItem('firth_refresh_token', 'ref-1')
+    // /auth/me (expired → non-ok) → /auth/refresh (ok, rotated pair) → /auth/me (ok, user)
+    const fetcher = makeFetcher([
+      { ok: false, body: { error: 'unauthorized' } },
+      { ok: true, body: { token: 'tok-2', refreshToken: 'ref-2' } },
+      { ok: true, body: { user: { id: 'u1', email: 'a@b.co' } } },
+    ])
+    const auth = createControlPlaneAuth(API_URL, fetcher as unknown as typeof fetch)
+
+    const result = await auth.restore()
+
+    expect(result).toEqual({ user: { id: 'u1', email: 'a@b.co' }, token: 'tok-2' })
+    expect(localStorage.getItem('firth_token')).toBe('tok-2')
+    expect(localStorage.getItem('firth_refresh_token')).toBe('ref-2')
+  })
+
+  it('restore clears both tokens when the refresh token is also rejected', async () => {
+    localStorage.setItem('firth_token', 'expired-tok')
+    localStorage.setItem('firth_refresh_token', 'ref-expired')
+    const fetcher = makeFetcher([
+      { ok: false, body: { error: 'unauthorized' } },       // /auth/me
+      { ok: false, body: { error: 'invalid refresh token' } }, // /auth/refresh
+    ])
+    const auth = createControlPlaneAuth(API_URL, fetcher as unknown as typeof fetch)
+
+    const result = await auth.restore()
+
+    expect(result).toBeNull()
+    expect(localStorage.getItem('firth_token')).toBeNull()
+    expect(localStorage.getItem('firth_refresh_token')).toBeNull()
+  })
+
   it('signUp returning needsVerification:true does NOT store a token', async () => {
     const fetcher = makeFetcher([{ ok: true, body: { needsVerification: true } }])
     const auth = createControlPlaneAuth(API_URL, fetcher as unknown as typeof fetch)
