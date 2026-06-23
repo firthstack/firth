@@ -22,7 +22,9 @@ Bind each worktree to a firth branch **before** dispatching the agent:
 git worktree add -b feat-x ../proj-feat-x main      # isolated CODE copy on its own git branch
 cd ../proj-feat-x
 firth branch create feat-x && firth branch switch feat-x && firth secrets   # isolated DB + compute + creds
+npm install                                                                 # fresh worktree has NO node_modules — install before the first build
 ```
+> **Fresh-worktree gotcha:** `git worktree add` creates a clean checkout with **no `node_modules`** (it isn't shared from the main checkout). The first `npm run build`/`firth deploy` build step fails with `Module not found` until you `npm install` in the new worktree. Do it as part of worktree setup.
 Then dispatch one subagent per worktree: work only in its dir, implement, `firth deploy`, **capture the printed URL and test against it**, open a PR. Mapping = **1:1:1 — task ↔ git worktree (code) ↔ firth branch (data + compute)**. Create both layers.
 
 ## Promote a branch to main (merge → migrate → redeploy → validate)
