@@ -131,6 +131,149 @@ function SecretRow({
 }
 
 // ---------------------------------------------------------------------------
+// BranchGraph — a real visual fork graph: each branch is a node (colored by
+// status), connected to its parent by an edge. Top-down layered layout; nodes
+// link to their live URL. This is the "chart of the branching" view.
+// ---------------------------------------------------------------------------
+function BranchGraph({ branches, resources }: { branches: Branch[]; resources: Resource[] }) {
+  const ids = new Set(branches.map((b) => b.id))
+  const childrenOf = new Map<string, Branch[]>()
+  for (const b of branches) {
+    const p = b.parent_branch_id && ids.has(b.parent_branch_id) ? b.parent_branch_id : null
+    if (p) {
+      const list = childrenOf.get(p) ?? []
+      list.push(b)
+      childrenOf.set(p, list)
+    }
+  }
+  const roots = branches
+    .filter((b) => !b.parent_branch_id || !ids.has(b.parent_branch_id))
+    .sort((a, b) => Number(b.is_default) - Number(a.is_default))
+
+  // DFS to assign a tree depth to each node (children sit one row below parent).
+  const depthOf = new Map<string, number>()
+  const seen = new Set<string>()
+  const walk = (b: Branch, depth: number) => {
+    if (seen.has(b.id)) return
+    seen.add(b.id)
+    depthOf.set(b.id, depth)
+    for (const c of childrenOf.get(b.id) ?? []) walk(c, depth + 1)
+  }
+  roots.forEach((r) => walk(r, 0))
+  branches.forEach((b) => { if (!seen.has(b.id)) depthOf.set(b.id, 0) })
+
+  // Group by depth → each depth is a horizontal row; spread nodes evenly.
+  const rows = new Map<number, Branch[]>()
+  branches.forEach((b) => {
+    const d = depthOf.get(b.id) ?? 0
+    const list = rows.get(d) ?? []
+    list.push(b)
+    rows.set(d, list)
+  })
+
+  const NODE_W = 168
+  const NODE_H = 46
+  const GAP_X = 28
+  const GAP_Y = 64
+  const PAD = 12
+  const maxRow = Math.max(1, ...[...rows.values()].map((r) => r.length))
+  const maxDepth = Math.max(0, ...[...depthOf.values()])
+  const width = PAD * 2 + maxRow * NODE_W + (maxRow - 1) * GAP_X
+  const height = PAD * 2 + (maxDepth + 1) * NODE_H + maxDepth * GAP_Y
+
+  const pos = new Map<string, { x: number; y: number }>()
+  ;[...rows.entries()].forEach(([depth, row]) => {
+    const rowW = row.length * NODE_W + (row.length - 1) * GAP_X
+    const offset = (width - rowW) / 2
+    row.forEach((b, i) => {
+      pos.set(b.id, {
+        x: offset + i * (NODE_W + GAP_X) + NODE_W / 2,
+        y: PAD + depth * (NODE_H + GAP_Y) + NODE_H / 2,
+      })
+    })
+  })
+
+  const colorFor = (status: string) =>
+    (STATUS_STYLE[status]?.color ?? 'var(--fg-dim)')
+  const glyphFor = (status: string) => (STATUS_STYLE[status]?.glyph ?? '○')
+
+  return (
+    <Panel title="branch graph">
+      <div style={{ width: '100%', overflowX: 'auto' }}>
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          width={width}
+          height={height}
+          role="img"
+          aria-label="branch fork graph"
+          style={{ maxWidth: '100%', height: 'auto', display: 'block' }}
+        >
+          {/* edges: parent bottom-center → child top-center */}
+          {branches.map((b) => {
+            const p = b.parent_branch_id && ids.has(b.parent_branch_id) ? b.parent_branch_id : null
+            if (!p) return null
+            const cp = pos.get(p)
+            const cc = pos.get(b.id)
+            if (!cp || !cc) return null
+            const x1 = cp.x, y1 = cp.y + NODE_H / 2
+            const x2 = cc.x, y2 = cc.y - NODE_H / 2
+            const midY = (y1 + y2) / 2
+            return (
+              <path
+                key={`e-${b.id}`}
+                d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                fill="none"
+                stroke="var(--border)"
+                strokeWidth={1.5}
+              />
+            )
+          })}
+          {/* nodes */}
+          {branches.map((b) => {
+            const c = pos.get(b.id)
+            if (!c) return null
+            const x = c.x - NODE_W / 2
+            const y = c.y - NODE_H / 2
+            const col = colorFor(b.status)
+            const url = flyUrlForBranch(b, resources)
+            const node = (
+              <g>
+                <rect
+                  x={x}
+                  y={y}
+                  width={NODE_W}
+                  height={NODE_H}
+                  rx={4}
+                  fill="var(--bg-panel)"
+                  stroke={col}
+                  strokeWidth={b.is_default ? 2 : 1.25}
+                />
+                <text x={x + 10} y={y + 19} fill={col} fontSize={13} fontFamily="var(--mono)">
+                  {glyphFor(b.status)} {b.name}{b.is_default ? '  (default)' : ''}
+                </text>
+                <text x={x + 10} y={y + 36} fill="var(--fg-dim)" fontSize={11} fontFamily="var(--mono)">
+                  {url ? url.replace(/^https:\/\//, '') : 'no compute yet'}
+                </text>
+              </g>
+            )
+            return url ? (
+              <a key={`n-${b.id}`} href={url} target="_blank" rel="noreferrer">{node}</a>
+            ) : (
+              <g key={`n-${b.id}`}>{node}</g>
+            )
+          })}
+        </svg>
+      </div>
+      <p className="firth-dim">
+        <span style={{ color: 'var(--green)' }}>● active</span>{'  '}
+        <span style={{ color: 'var(--amber)' }}>◐ creating</span>{'  '}
+        <span style={{ color: 'var(--red)' }}>✕ error</span>{'  ·  click a node to open its url'}
+      </p>
+    </Panel>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // BranchesPanel — the centerpiece: every branch as a lineage tree node with a
 // status badge and its live URL inline. This is where the workflow lives, so
 // it renders first and makes branch health + endpoints visible at a glance.
@@ -425,6 +568,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
                 : <><span aria-hidden="true">🔒</span>{' secrets require approval — approve the pending request in the Approvals panel below (or run `firth approve <id>`), then reload.'}</>}
             </p>
           )}
+          <BranchGraph branches={detail.branches} resources={detail.resources} />
           <BranchesPanel
             branches={detail.branches}
             resources={detail.resources}

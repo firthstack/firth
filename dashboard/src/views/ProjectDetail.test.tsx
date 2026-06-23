@@ -277,7 +277,7 @@ describe('ProjectDetail — branch visibility', () => {
     render(<ProjectDetail api={apiV()} projectId="p1" onBack={vi.fn()} />)
     await screen.findByText('half-baked')
     // creating branch has no compute yet
-    expect(screen.getByText(/no compute yet/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/no compute yet/i).length).toBeGreaterThanOrEqual(1)
     // header summary flags the one unhealthy branch
     expect(screen.getByText(/1 pending\/failed/i)).toBeInTheDocument()
   })
@@ -287,6 +287,43 @@ describe('ProjectDetail — branch visibility', () => {
     await screen.findByText('main')
     // status badges render the status label (glyph + text), so match by substring
     expect(screen.getAllByText(/active/).length).toBeGreaterThanOrEqual(2)
-    expect(screen.getByText(/creating/)).toBeInTheDocument()
+    expect(screen.getAllByText(/creating/).length).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('ProjectDetail — branch graph (visual)', () => {
+  const detailG = {
+    project: { id: 'p1', name: 'first', status: 'active' },
+    branches: [
+      { id: 'b1', name: 'main', is_default: true, neon_branch_ref: 'br-x', status: 'active', parent_branch_id: null },
+      { id: 'b2', name: 'feat-a', is_default: false, neon_branch_ref: 'br-a', status: 'active', parent_branch_id: 'b1' },
+      { id: 'b3', name: 'feat-b', is_default: false, neon_branch_ref: null, status: 'creating', parent_branch_id: 'b1' },
+    ],
+    resources: [
+      { kind: 'neon', status: 'active', provider_ref: {} },
+      { kind: 'fly', status: 'active', branch_id: 'b1', provider_ref: { flyApp: 'firth-main-x' } },
+      { kind: 'fly', status: 'active', branch_id: 'b2', provider_ref: { flyApp: 'firth-a-y' } },
+    ],
+  }
+  function apiG(): Api {
+    return {
+      listProjects: vi.fn(), getProject: vi.fn(async () => detailG), createProject: vi.fn(), deleteProject: vi.fn(),
+      createBranch: vi.fn(async () => ({})), deleteBranch: vi.fn(async () => ({})),
+      getSecrets: vi.fn(async () => ({ secrets: {} })),
+      listApprovals: vi.fn(async () => []), approve: vi.fn(async () => ({})), deny: vi.fn(async () => ({})),
+    } as unknown as Api
+  }
+
+  it('renders an svg graph with a node per branch and parent links to child urls', async () => {
+    const { container } = render(<ProjectDetail api={apiG()} projectId="p1" onBack={vi.fn()} />)
+    await screen.findByText('branch graph')
+    const svg = container.querySelector('svg[aria-label="branch fork graph"]')
+    expect(svg).toBeTruthy()
+    // one edge path per non-root branch (feat-a + feat-b = 2)
+    expect(svg!.querySelectorAll('path').length).toBe(2)
+    // active branches with compute are clickable links in the graph
+    const links = [...svg!.querySelectorAll('a')].map((a) => a.getAttribute('href'))
+    expect(links).toContain('https://firth-main-x.fly.dev')
+    expect(links).toContain('https://firth-a-y.fly.dev')
   })
 })
