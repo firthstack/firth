@@ -19,6 +19,87 @@ function copyDotEnv(pairs: Array<[string, string]>) {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: live URL for a branch's Fly compute (null if not provisioned yet)
+// ---------------------------------------------------------------------------
+function flyUrlForBranch(branch: Branch, resources: Resource[]): string | null {
+  // Prefer the compute resource explicitly tied to this branch...
+  let r = resources.find((x) => x.kind === 'fly' && x.branch_id === branch.id)
+  // ...but the default branch's compute may be recorded project-level (no branch_id).
+  if (!r && branch.is_default) r = resources.find((x) => x.kind === 'fly' && !x.branch_id)
+  const app = r ? String((r.provider_ref ?? {}).flyApp ?? '') : ''
+  return app ? `https://${app}.fly.dev` : null
+}
+
+// ---------------------------------------------------------------------------
+// Helper: relative "age" string from an ISO timestamp
+// ---------------------------------------------------------------------------
+function ago(iso?: string): string {
+  if (!iso) return ''
+  const then = Date.parse(iso)
+  if (Number.isNaN(then)) return ''
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.round(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  return `${Math.round(hrs / 24)}d ago`
+}
+
+// ---------------------------------------------------------------------------
+// Helper: order branches by fork lineage (parent -> child), default first.
+// Returns each branch with its tree depth so forks render indented.
+// ---------------------------------------------------------------------------
+function orderByLineage(branches: Branch[]): Array<{ branch: Branch; depth: number }> {
+  const ids = new Set(branches.map((b) => b.id))
+  const childrenOf = new Map<string, Branch[]>()
+  for (const b of branches) {
+    const p = b.parent_branch_id
+    if (p && ids.has(p)) {
+      const list = childrenOf.get(p) ?? []
+      list.push(b)
+      childrenOf.set(p, list)
+    }
+  }
+  // roots = no parent, or a parent that isn't in this project's set
+  const roots = branches
+    .filter((b) => !b.parent_branch_id || !ids.has(b.parent_branch_id))
+    .sort((a, b) => Number(b.is_default) - Number(a.is_default))
+
+  const out: Array<{ branch: Branch; depth: number }> = []
+  const seen = new Set<string>()
+  const walk = (b: Branch, depth: number) => {
+    if (seen.has(b.id)) return
+    seen.add(b.id)
+    out.push({ branch: b, depth })
+    for (const c of childrenOf.get(b.id) ?? []) walk(c, depth + 1)
+  }
+  roots.forEach((r) => walk(r, 0))
+  // any branches not reached (cycles / odd data) still get listed
+  branches.forEach((b) => { if (!seen.has(b.id)) out.push({ branch: b, depth: 0 }) })
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// StatusBadge — color-coded health glyph so half-created / failed branches
+// (the ones that silently pile up) are visible at a glance.
+// ---------------------------------------------------------------------------
+const STATUS_STYLE: Record<string, { color: string; glyph: string }> = {
+  active: { color: 'var(--green)', glyph: '●' },
+  creating: { color: 'var(--amber)', glyph: '◐' },
+  error: { color: 'var(--red)', glyph: '✕' },
+  deleted: { color: 'var(--fg-dim)', glyph: '○' },
+}
+function StatusBadge({ status }: { status: string }) {
+  const s = STATUS_STYLE[status] ?? { color: 'var(--fg-dim)', glyph: '○' }
+  return (
+    <span style={{ color: s.color, flexShrink: 0, minWidth: '11ch' }} title={`status: ${status}`}>
+      {s.glyph} {status}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // SecretRow — labeled monospace line with optional [copy] button
 // ---------------------------------------------------------------------------
 function SecretRow({
@@ -50,30 +131,93 @@ function SecretRow({
 }
 
 // ---------------------------------------------------------------------------
-// LinkRow — labeled clickable URL (opens in a new tab) with a [copy] button
+// BranchesPanel — the centerpiece: every branch as a lineage tree node with a
+// status badge and its live URL inline. This is where the workflow lives, so
+// it renders first and makes branch health + endpoints visible at a glance.
 // ---------------------------------------------------------------------------
-function LinkRow({ label, href }: { label: string; href: string }) {
+function BranchesPanel({
+  branches,
+  resources,
+  creating,
+  setCreating,
+  name,
+  setName,
+  from,
+  setFrom,
+  busy,
+  deletingBranch,
+  onCreate,
+  onRequestDelete,
+}: {
+  branches: Branch[]
+  resources: Resource[]
+  creating: boolean
+  setCreating: (fn: (c: boolean) => boolean) => void
+  name: string
+  setName: (v: string) => void
+  from: string
+  setFrom: (v: string) => void
+  busy: boolean
+  deletingBranch: string | null
+  onCreate: () => void
+  onRequestDelete: (id: string) => void
+}) {
+  const total = branches.length
+  const active = branches.filter((b) => b.status === 'active').length
+  const unhealthy = branches.filter((b) => b.status !== 'active' && b.status !== 'deleted').length
+  const ordered = orderByLineage(branches)
+
   return (
-    <Row>
-      <span className="firth-dim" style={{ minWidth: '14ch', flexShrink: 0 }}>
-        {label}
-      </span>
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <div style={{ overflowX: 'auto' }}>
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            style={{ whiteSpace: 'pre', fontFamily: 'inherit', color: 'inherit' }}
-          >
-            {href}
-          </a>
-        </div>
-      </div>
-      <TButton onClick={() => copyText(href)} style={{ flexShrink: 0 }}>
-        [copy]
-      </TButton>
-    </Row>
+    <Panel title="branches">
+      <Row>
+        <TButton onClick={() => setCreating((c) => !c)}>[+ create branch]</TButton>
+        <span style={{ flex: 1 }} />
+        <span className="firth-dim">{total} total</span>
+        <span style={{ color: 'var(--green)' }}>{active} active</span>
+        {unhealthy > 0 && <span style={{ color: 'var(--amber)' }}>{unhealthy} pending/failed</span>}
+      </Row>
+      <CliHint command="firth branch create <name>" note="# forks an isolated db branch + its own compute & url" />
+      <p className="firth-dim">each branch = isolated Neon branch + its own Fly machine (shared-cpu-1x · 256 MB) at its own url</p>
+      {creating && (
+        <Row>
+          <label htmlFor="branch-name">name</label>
+          <TInput id="branch-name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
+          <label htmlFor="branch-from">from</label>
+          <TInput id="branch-from" value={from} onChange={(e) => setFrom(e.target.value)} disabled={busy} />
+          <TButton onClick={onCreate} disabled={busy}>{busy ? 'creating…' : '[ok]'}</TButton>
+          <TButton onClick={() => { setCreating(() => false); setName(''); setFrom('main') }} disabled={busy}>[cancel]</TButton>
+        </Row>
+      )}
+      {ordered.map(({ branch: b, depth }) => {
+        const url = flyUrlForBranch(b, resources)
+        return (
+          <Row key={b.id}>
+            {depth > 0 && (
+              <span className="firth-dim" style={{ flexShrink: 0, paddingLeft: `${(depth - 1) * 2}ch` }}>└─</span>
+            )}
+            <StatusBadge status={b.status} />
+            <strong style={{ flexShrink: 0 }}>{b.name}</strong>
+            {b.is_default && <span className="firth-dim" style={{ flexShrink: 0 }}>default</span>}
+            <span style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+              <span style={{ overflowX: 'auto', display: 'block' }}>
+                {url ? (
+                  <a href={url} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', whiteSpace: 'pre', fontFamily: 'inherit' }}>{url}</a>
+                ) : (
+                  <span className="firth-dim">no compute yet — `firth deploy`</span>
+                )}
+              </span>
+            </span>
+            {b.created_at && <span className="firth-dim" style={{ flexShrink: 0 }}>{ago(b.created_at)}</span>}
+            {url && <TButton onClick={() => copyText(url)} style={{ flexShrink: 0 }}>[copy]</TButton>}
+            {!b.is_default && (
+              <TButton className="firth-btn--danger" onClick={() => onRequestDelete(b.id)} disabled={busy} style={{ flexShrink: 0 }}>
+                {deletingBranch === b.id ? 'deleting…' : '[delete]'}
+              </TButton>
+            )}
+          </Row>
+        )
+      })}
+    </Panel>
   )
 }
 
@@ -163,42 +307,6 @@ function StorageCard({
           {accessKeyId && <SecretRow label="AWS_ACCESS_KEY_ID" value={accessKeyId} copyable />}
           {secretKey && <SecretRow label="AWS_SECRET_ACCESS_KEY" value={secretKey} copyable />}
         </>
-      )}
-    </Panel>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Compute card
-// ---------------------------------------------------------------------------
-function ComputeCard({ resources, branches }: { resources: Resource[]; branches: Branch[] }) {
-  const flyResources = resources.filter((r) => r.kind === 'fly')
-  const nameFor = (id?: string) => branches.find((b) => b.id === id)?.name ?? '(unknown branch)'
-  return (
-    <Panel title="compute">
-      {flyResources.length === 0 ? (
-        <p className="firth-dim">not provisioned</p>
-      ) : (
-        flyResources.map((resource) => {
-          const ref = resource.provider_ref ?? {}
-          const flyApp = String(ref.flyApp ?? '')
-          const orgSlug = String(ref.orgSlug ?? '')
-          return (
-            <div key={resource.branch_id ?? flyApp}>
-              <Row>
-                <strong>{nameFor(resource.branch_id)}</strong>
-                <span className="firth-dim">{resource.status}</span>
-              </Row>
-              {flyApp && <SecretRow label="app" value={flyApp} />}
-              {flyApp && <LinkRow label="url" href={`https://${flyApp}.fly.dev`} />}
-              {orgSlug && <SecretRow label="org" value={orgSlug} />}
-              <SecretRow label="spec" value="shared-cpu-1x · 1 vCPU · 256 MB" />
-            </div>
-          )
-        })
-      )}
-      {flyResources.length > 0 && (
-        <p className="firth-dim">deploy with `firth deploy` to create a machine</p>
       )}
     </Panel>
   )
@@ -317,35 +425,23 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
                 : <><span aria-hidden="true">🔒</span>{' secrets require approval — approve the pending request in the Approvals panel below (or run `firth approve <id>`), then reload.'}</>}
             </p>
           )}
+          <BranchesPanel
+            branches={detail.branches}
+            resources={detail.resources}
+            creating={creating}
+            setCreating={setCreating}
+            name={name}
+            setName={setName}
+            from={from}
+            setFrom={setFrom}
+            busy={busy}
+            deletingBranch={deletingBranch}
+            onCreate={create}
+            onRequestDelete={setConfirmBranch}
+          />
           <PostgresCard resource={neonResource} databaseUrl={branchSecrets['DATABASE_URL']} />
           <StorageCard resource={s3Resource} projectSecrets={projectSecrets} />
-          <ComputeCard resources={detail?.resources ?? []} branches={detail?.branches ?? []} />
           <ApprovalsPanel api={api} projectId={projectId} />
-          <Panel title="branches">
-            <Row><TButton onClick={() => setCreating((c) => !c)}>[+ create branch]</TButton></Row>
-            <CliHint command="firth branch create <name>" note="# or from the cli — forks an isolated db branch" />
-            {creating && (
-              <Row>
-                <label htmlFor="branch-name">name</label>
-                <TInput id="branch-name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
-                <label htmlFor="branch-from">from</label>
-                <TInput id="branch-from" value={from} onChange={(e) => setFrom(e.target.value)} disabled={busy} />
-                <TButton onClick={create} disabled={busy}>{busy ? 'creating…' : '[ok]'}</TButton>
-                <TButton onClick={() => { setCreating(false); setName(''); setFrom('main') }} disabled={busy}>[cancel]</TButton>
-              </Row>
-            )}
-            {detail.branches.map((b) => (
-              <Row key={b.id}>
-                <span style={{ flex: 1 }}>{b.name}</span>
-                {b.is_default && <span className="firth-dim">default</span>}
-                <span className="firth-dim">{b.neon_branch_ref ?? '-'}</span>
-                <span className="firth-dim">{b.status}</span>
-                {!b.is_default && (
-                  <TButton className="firth-btn--danger" onClick={() => setConfirmBranch(b.id)} disabled={busy}>{deletingBranch === b.id ? 'deleting…' : '[delete]'}</TButton>
-                )}
-              </Row>
-            ))}
-          </Panel>
           {confirmBranch && (
             <Confirm
               message="deleting this branch destroys its Neon branch. this is irreversible. continue?"

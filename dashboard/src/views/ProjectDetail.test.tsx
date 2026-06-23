@@ -75,15 +75,15 @@ describe('ProjectDetail', () => {
 
   // ---- compute card --------------------------------------------------------
 
-  it('compute card shows the fly app and status active', async () => {
+  it('branches panel shows the default branch live url and status', async () => {
     render(<ProjectDetail api={fakeApi()} projectId="p1" onBack={vi.fn()} />)
-    expect(await screen.findByText('firth-first-cd34')).toBeInTheDocument()
-    // the status 'active' appears in the compute card's row
-    const activeEls = screen.getAllByText('active')
-    expect(activeEls.length).toBeGreaterThan(0)
+    // default branch (main) picks up the project-level fly compute url
+    expect(await screen.findByText('https://firth-first-cd34.fly.dev')).toBeInTheDocument()
+    // status text rendered next to branches
+    expect(screen.getAllByText('active').length).toBeGreaterThan(0)
   })
 
-  it('compute card shows the reachable host url as a clickable link', async () => {
+  it('shows the reachable host url as a clickable link', async () => {
     render(<ProjectDetail api={fakeApi()} projectId="p1" onBack={vi.fn()} />)
     const link = await screen.findByRole('link', { name: 'https://firth-first-cd34.fly.dev' })
     expect(link).toHaveAttribute('href', 'https://firth-first-cd34.fly.dev')
@@ -164,7 +164,7 @@ describe('ProjectDetail', () => {
 
   // ---- per-branch compute card ---------------------------------------------
 
-  it('compute card renders one entry per fly resource labeled by branch name', async () => {
+  it('branches panel renders each fly-backed branch with its own url', async () => {
     const multiFlyDetail = {
       project: { id: 'p1', name: 'first', status: 'active' },
       branches: [
@@ -179,10 +179,10 @@ describe('ProjectDetail', () => {
     }
     const api = fakeApi({ getProject: vi.fn(async () => multiFlyDetail) })
     render(<ProjectDetail api={api} projectId="p1" onBack={vi.fn()} />)
-    // both fly apps must render
-    expect(await screen.findByText('app-main')).toBeInTheDocument()
-    expect(screen.getByText('app-feat')).toBeInTheDocument()
-    // each labeled by its branch name (branch names also appear in the branches panel, so use getAllByText)
+    // each branch shows its own live url in the branches panel
+    expect(await screen.findByText('https://app-main.fly.dev')).toBeInTheDocument()
+    expect(screen.getByText('https://app-feat.fly.dev')).toBeInTheDocument()
+    // each labeled by its branch name
     expect(screen.getAllByText('main').length).toBeGreaterThan(0)
     expect(screen.getAllByText('feature').length).toBeGreaterThan(0)
   })
@@ -238,5 +238,55 @@ describe('ProjectDetail', () => {
     // Resources and approvals still render (page does not crash)
     expect(screen.getByText('postgres')).toBeInTheDocument()
     expect(screen.getByText('approvals')).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Branch visibility: inline live URL, status badges, lineage, health counts
+// ---------------------------------------------------------------------------
+describe('ProjectDetail — branch visibility', () => {
+  const detailV = {
+    project: { id: 'p1', name: 'first', status: 'active' },
+    branches: [
+      { id: 'b1', name: 'main', is_default: true, neon_branch_ref: 'br-x', status: 'active', parent_branch_id: null },
+      { id: 'b2', name: 'feat-detail', is_default: false, neon_branch_ref: 'br-d', status: 'active', parent_branch_id: 'b1' },
+      { id: 'b3', name: 'half-baked', is_default: false, neon_branch_ref: null, status: 'creating', parent_branch_id: 'b1' },
+    ],
+    resources: [
+      { kind: 'neon', status: 'active', provider_ref: { neonProjectId: 'np' } },
+      { kind: 'fly', status: 'active', branch_id: 'b1', provider_ref: { flyApp: 'firth-main-aa11' } },
+      { kind: 'fly', status: 'active', branch_id: 'b2', provider_ref: { flyApp: 'firth-detail-bb22' } },
+    ],
+  }
+  function apiV(): Api {
+    return {
+      listProjects: vi.fn(), getProject: vi.fn(async () => detailV), createProject: vi.fn(), deleteProject: vi.fn(),
+      createBranch: vi.fn(async () => ({})), deleteBranch: vi.fn(async () => ({})),
+      getSecrets: vi.fn(async () => ({ secrets: {} })),
+      listApprovals: vi.fn(async () => []), approve: vi.fn(async () => ({})), deny: vi.fn(async () => ({})),
+    } as unknown as Api
+  }
+
+  it('shows each branch its own live Fly URL inline', async () => {
+    render(<ProjectDetail api={apiV()} projectId="p1" onBack={vi.fn()} />)
+    expect(await screen.findByText('https://firth-main-aa11.fly.dev')).toBeInTheDocument()
+    expect(screen.getByText('https://firth-detail-bb22.fly.dev')).toBeInTheDocument()
+  })
+
+  it('surfaces a half-created branch as not-yet-deployed and counts it as pending/failed', async () => {
+    render(<ProjectDetail api={apiV()} projectId="p1" onBack={vi.fn()} />)
+    await screen.findByText('half-baked')
+    // creating branch has no compute yet
+    expect(screen.getByText(/no compute yet/i)).toBeInTheDocument()
+    // header summary flags the one unhealthy branch
+    expect(screen.getByText(/1 pending\/failed/i)).toBeInTheDocument()
+  })
+
+  it('renders branch status next to each branch', async () => {
+    render(<ProjectDetail api={apiV()} projectId="p1" onBack={vi.fn()} />)
+    await screen.findByText('main')
+    // status badges render the status label (glyph + text), so match by substring
+    expect(screen.getAllByText(/active/).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText(/creating/)).toBeInTheDocument()
   })
 })
