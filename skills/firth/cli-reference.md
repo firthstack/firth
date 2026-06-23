@@ -28,6 +28,7 @@ firth deploy <dir> --port <n>          # SOURCE (preferred): builds the Dockerfi
 firth deploy --image <url> --port <n>  # IMAGE: deploy a pre-built / already-pushed image
 # both target the CURRENT branch's compute; --from <branch> targets another; URL prints on success
 ```
+`--port` must match the port the image actually listens on (`ENV PORT`/`EXPOSE`/server bind) — a mismatch boots fine but every request fails with `instance refused connection on 0.0.0.0:<port>`. See workflow.md gotchas.
 Secrets are **injected at deploy** as env vars (decrypted from the branch). Read creds from `process.env` in production; **never bake `./.env` into the image** (it's local-dev only). A branch serves **one app on one port** at `https://<app>.fly.dev`.
 
 ## Dockerfile templates
