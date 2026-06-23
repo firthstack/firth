@@ -22,6 +22,9 @@ const SKILLS: Array<{ label: string; args: string[] }> = [
     '-s', 'tigris-security-access-control', '-s', 'tigris-image-optimization',
     '-s', 'tigris-s3-migration', '-s', 'tigris-static-assets', '-s', 'tigris-agent-kit',
     ...AGENT_FLAGS] },
+  { label: 'better-auth', args: ['skills', 'add', 'better-auth/skills',
+    '-s', 'better-auth-best-practices', '-s', 'email-and-password-best-practices',
+    '-s', 'better-auth-security-best-practices', ...AGENT_FLAGS] },
   { label: 'firth', args: ['skills', 'add', 'firthstack/firth', '-s', 'firth', ...AGENT_FLAGS] },
 ]
 
@@ -34,7 +37,7 @@ export async function ensureSkills(deps: SkillsDeps): Promise<void> {
   try {
     const link = readProjectLink(deps.cwd)
     if (!link || link.skillsInstalled) return // not linked yet, or already done
-    deps.print('installing related agent skills (neon, tigris, firth) via `npx skills add` …')
+    deps.print('installing related agent skills (neon, tigris, better-auth, firth) via `npx skills add` …')
     for (const s of SKILLS) {
       const r = await run('npx', s.args, true) // streamed so the user sees progress
       deps.print(r.ok ? `  ${s.label} ✓` : `  ${s.label} failed — add manually: npx ${s.args.join(' ')}`)
