@@ -74,7 +74,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   }
 
   app.register(cors, {
-    origin: deps.cfg.corsOrigins ?? ['http://localhost:5173'],
+    origin: deps.cfg.corsOrigins ?? ['http://localhost:5173', 'https://u4vrn3sx.insforge.site', 'https://firth-dashboard.vercel.app'],
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type'],
   })
@@ -277,6 +277,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!refreshToken) return reply.code(400).send({ error: 'refreshToken is required' })
     try { return reply.send(await deps.authProxy!.refresh(refreshToken)) }
     catch { return reply.code(401).send({ error: 'invalid refresh token' }) }
+  })
+
+  app.post('/auth/oauth/start', async (req, reply) => {
+    const { provider, redirectTo } = (req.body as any) ?? {}
+    if (!provider || !redirectTo) return reply.code(400).send({ error: 'provider and redirectTo are required' })
+    try { return reply.send(await deps.authProxy!.oauthStart(provider, redirectTo)) }
+    catch (e) { return reply.code(400).send({ error: e instanceof Error ? e.message : 'oauth start failed' }) }
+  })
+
+  app.post('/auth/oauth/exchange', async (req, reply) => {
+    const { code, codeVerifier } = (req.body as any) ?? {}
+    if (!code) return reply.code(400).send({ error: 'code is required' })
+    try { return reply.send(await deps.authProxy!.oauthExchange(code, codeVerifier)) }
+    catch (e) { return reply.code(401).send({ error: e instanceof Error ? e.message : 'oauth exchange failed' }) }
   })
 
   app.post('/auth/signup', async (req, reply) => {

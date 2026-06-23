@@ -6,6 +6,9 @@ export interface Auth {
   signUp(email: string, password: string, name?: string): Promise<{ needsVerification: boolean; user?: AuthUser; token?: string }>
   resendVerification(email: string): Promise<void>
   signOut(): Promise<void>
+  // OAuth (optional — provided by the control-plane auth). start -> redirect; exchange -> tokens.
+  oauthStart?(provider: string, redirectTo: string): Promise<{ url: string; codeVerifier: string | null }>
+  oauthExchange?(code: string, codeVerifier?: string | null): Promise<{ user: AuthUser; token: string }>
 }
 
 const TOKEN_KEY = 'firth_token'
@@ -93,6 +96,21 @@ export function createControlPlaneAuth(apiUrl: string, fetcher: typeof fetch = (
     async signOut() {
       localStorage.removeItem(TOKEN_KEY)
       localStorage.removeItem(REFRESH_KEY)
+    },
+
+    async oauthStart(provider, redirectTo) {
+      // Control plane asks InsForge for the provider authorize URL + PKCE verifier.
+      return call('/auth/oauth/start', { method: 'POST', body: JSON.stringify({ provider, redirectTo }) })
+    },
+
+    async oauthExchange(code, codeVerifier) {
+      const { token, refreshToken, user } = await call('/auth/oauth/exchange', {
+        method: 'POST',
+        body: JSON.stringify({ code, codeVerifier }),
+      })
+      localStorage.setItem(TOKEN_KEY, token)
+      if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken)
+      return { user, token }
     },
   }
 }

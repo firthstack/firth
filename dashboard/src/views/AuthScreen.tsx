@@ -50,6 +50,19 @@ export function AuthScreen({ auth, onAuthed, onBack }: { auth: Auth; onAuthed: (
     }
   }
 
+  async function oauth(provider: 'github' | 'google') {
+    if (!auth.oauthStart) return
+    setError(null); setNotice(null); setBusy(true)
+    try {
+      const { url, codeVerifier } = await auth.oauthStart(provider, window.location.origin)
+      if (codeVerifier) sessionStorage.setItem('firth_oauth_verifier', codeVerifier)
+      window.location.assign(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `could not start ${provider} sign-in`)
+      setBusy(false)
+    }
+  }
+
   return (
     <Panel title="firth // access">
       {onBack && (
@@ -61,6 +74,14 @@ export function AuthScreen({ auth, onAuthed, onBack }: { auth: Auth; onAuthed: (
         <TButton onClick={() => { setMode('signin'); setError(null); setNotice(null) }} disabled={mode === 'signin'}>[sign in]</TButton>
         <TButton onClick={() => { setMode('signup'); setError(null); setNotice(null) }} disabled={mode === 'signup'}>[create account]</TButton>
       </Row>
+      {auth.oauthStart && (
+        <>
+          <Row>
+            <TButton onClick={() => oauth('github')} disabled={busy} data-testid="oauth-github">[ sign in with github ]</TButton>
+          </Row>
+          <p className="firth-dim">— or with email —</p>
+        </>
+      )}
       <form onSubmit={submit}>
         <Row>
           <label htmlFor="email">email</label>
