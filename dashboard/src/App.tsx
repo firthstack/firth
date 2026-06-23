@@ -31,6 +31,20 @@ export default function App({
 
   useEffect(() => {
     let active = true
+    // OAuth return: InsForge appends ?insforge_code=… to our redirectTo. Exchange it
+    // (with the PKCE verifier stashed before the redirect) for a session, then clean the URL.
+    const params = new URLSearchParams(window.location.search)
+    const oauthCode = params.get('insforge_code')
+    if (oauthCode && auth.oauthExchange) {
+      const verifier = sessionStorage.getItem('firth_oauth_verifier')
+      sessionStorage.removeItem('firth_oauth_verifier')
+      window.history.replaceState({}, '', window.location.pathname)
+      void auth.oauthExchange(oauthCode, verifier).then((s) => {
+        if (!active) return
+        setToken(s.token); setUser(s.user); setReady(true)
+      }).catch(() => { if (active) setReady(true) })
+      return () => { active = false }
+    }
     void auth.restore().then((s) => {
       if (!active) return
       if (s) { setToken(s.token); setUser(s.user) }

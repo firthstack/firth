@@ -8,6 +8,8 @@ export type AuthProxy = {
   signUp(email: string, password: string, name?: string, redirectTo?: string): Promise<{ token: string | null; needsVerification: boolean; user: { id: string; email: string } | null }>
   resendVerification(email: string, redirectTo?: string): Promise<void>
   me(token: string): Promise<{ id: string; email: string } | null>
+  oauthStart(provider: string, redirectTo: string): Promise<{ url: string; codeVerifier: string | null }>
+  oauthExchange(code: string, codeVerifier?: string | null): Promise<{ token: string; refreshToken: string; user: { id: string; email: string } }>
 }
 
 export function authProxy(cfg: FirthConfig, makeClient: typeof createClient = createClient): AuthProxy {
@@ -45,6 +47,23 @@ export function authProxy(cfg: FirthConfig, makeClient: typeof createClient = cr
       const c = makeClient({ baseUrl: cfg.insforge.baseUrl, anonKey: cfg.insforge.anonKey, accessToken: token })
       const { data } = await c.auth.getCurrentUser()   // invalid token → no user → null (treated as 401)
       return data?.user ? { id: data.user.id, email: data.user.email } : null
+    },
+    // OAuth (PKCE) start: InsForge builds the provider authorize URL + a codeVerifier.
+    // We hand both back to the browser; it stashes the verifier, redirects to `url`,
+    // and later posts the returned `insforge_code` + verifier to oauthExchange below.
+    async oauthStart(provider, redirectTo) {
+      const { data, error } = await anon.auth.signInWithOAuth(provider, { redirectTo, skipBrowserRedirect: true })
+      if (error) throw error
+      if (!data?.url) throw new Error('failed to start oauth')
+      return { url: data.url, codeVerifier: data.codeVerifier ?? null }
+    },
+    // Exchange the post-redirect `insforge_code` (+ PKCE verifier) for a session.
+    // Server mode returns the refresh token in the body, matching login()'s shape.
+    async oauthExchange(code, codeVerifier) {
+      const { data, error } = await anon.auth.exchangeOAuthCode(code, codeVerifier ?? undefined)
+      if (error) throw error
+      if (!data?.accessToken) throw new Error('oauth exchange failed')
+      return { token: data.accessToken, refreshToken: (data as any).refreshToken, user: { id: data.user.id, email: data.user.email } }
     },
   }
 }

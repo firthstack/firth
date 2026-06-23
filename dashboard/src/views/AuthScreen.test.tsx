@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AuthScreen } from './AuthScreen'
 import type { Auth, AuthUser } from '../auth/auth'
@@ -73,5 +73,26 @@ describe('AuthScreen', () => {
     await userEvent.type(screen.getByLabelText(/password/i), 'pw')
     await userEvent.click(screen.getByTestId('auth-submit'))
     expect(await screen.findByTestId('resend-verification')).toBeInTheDocument()
+  })
+})
+
+describe('AuthScreen — GitHub OAuth', () => {
+  it('shows the GitHub button only when oauthStart is available and calls it with the origin', async () => {
+    const oauthStart = vi.fn(async () => ({ url: 'https://backend/api/auth/oauth/github/authorize?x=1', codeVerifier: 'cv-123' }))
+    // jsdom has no navigation; stub assign so the handler does not throw
+    const assign = vi.fn()
+    Object.defineProperty(window, 'location', { value: { ...window.location, assign, origin: 'https://firth.example' }, writable: true })
+    const auth = fakeAuth({ oauthStart })
+    render(<AuthScreen auth={auth} onAuthed={vi.fn()} />)
+    const btn = screen.getByTestId('oauth-github')
+    await userEvent.click(btn)
+    expect(oauthStart).toHaveBeenCalledWith('github', 'https://firth.example')
+    await waitFor(() => expect(sessionStorage.getItem('firth_oauth_verifier')).toBe('cv-123'))
+    expect(assign).toHaveBeenCalledWith('https://backend/api/auth/oauth/github/authorize?x=1')
+  })
+
+  it('hides the GitHub button when oauthStart is not provided', () => {
+    render(<AuthScreen auth={fakeAuth()} onAuthed={vi.fn()} />)
+    expect(screen.queryByTestId('oauth-github')).toBeNull()
   })
 })
