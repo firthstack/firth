@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Panel, Row, TButton, TInput, Confirm, CliHint } from '../ui/Terminal'
 import type { Api } from '../api/client'
 import type { ProjectDetail as Detail, Resource, Branch } from '../types'
+import type { ManifestEnv } from '../api/client'
 
 // ---------------------------------------------------------------------------
 // Helper: copy text to clipboard (guarded for missing API)
@@ -549,6 +550,53 @@ function DeployPanel({ api, projectId, branches }: { api: Api; projectId: string
   )
 }
 
+function ManifestPanel({ api, projectId }: { api: Api; projectId: string }) {
+  const [envs, setEnvs] = useState<ManifestEnv[] | null>(null)
+  useEffect(() => {
+    let on = true
+    api.getManifest?.(projectId)?.then((m) => { if (on) setEnvs(m.environments ?? []) }).catch(() => { if (on) setEnvs([]) })
+    return () => { on = false }
+  }, [api, projectId])
+  if (!envs || envs.length === 0) return null
+  const stColor = (st: string) => st === 'running' ? 'var(--green)' : (st === 'suspended' || st === 'stopped') ? 'var(--amber)' : 'var(--fg-dim)'
+  const stLabel = (st: string) => st === 'running' ? '● live' : st === 'suspended' ? '💤 asleep' : st === 'stopped' ? '○ stopped' : 'none'
+  const kind = (k: string) => <span className="firth-dim" style={{ minWidth: '9ch', flexShrink: 0 }}>{k}</span>
+  return (
+    <Panel title="manifest">
+      <CliHint command="firth manifest" note="# the agent-legible env spec — databases / storage / compute + wiring" />
+      {envs.map((e) => (
+        <div key={e.name} style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+          <Row>
+            <strong>{e.name}</strong>
+            {e.default && <span className="firth-dim">default</span>}
+            {e.cloneOf && <span className="firth-dim">← clone of {e.cloneOf}</span>}
+          </Row>
+          {e.databases.map((d) => (
+            <Row key={`db-${d.name}`}>{kind('db')}<code style={{ fontFamily: 'inherit' }}>{d.name}</code><span className="firth-dim">{d.engine} → {d.env}</span></Row>
+          ))}
+          {e.storage.map((st) => (
+            <Row key={`st-${st.name}`}>{kind('storage')}<code style={{ fontFamily: 'inherit' }}>{st.name}</code><span className="firth-dim">{st.engine}{st.shared ? ' (shared)' : ''}</span></Row>
+          ))}
+          {e.compute.length ? e.compute.map((c) => (
+            <Row key={`cp-${c.name}`}>
+              {kind('compute')}
+              <code style={{ fontFamily: 'inherit', flexShrink: 0 }}>{c.name}</code>
+              <span style={{ color: stColor(c.state), flexShrink: 0 }}>{stLabel(c.state)}</span>
+              <span style={{ flex: 1, overflow: 'hidden' }}>
+                <a href={c.url} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', whiteSpace: 'pre', fontFamily: 'inherit' }}>{c.url.replace(/^https:\/\//, '')}</a>
+              </span>
+              {c.uses?.length ? <span className="firth-dim" style={{ flexShrink: 0 }}>uses({c.uses.join(', ')})</span> : null}
+            </Row>
+          )) : (
+            <Row>{kind('compute')}<span className="firth-dim">(none — deploy to spin one up)</span></Row>
+          )}
+        </div>
+      ))}
+      <p className="firth-dim">wiring: public-url — resources reference each other by env var / url</p>
+    </Panel>
+  )
+}
+
 export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId: string; onBack: () => void }) {
   const [detail, setDetail] = useState<Detail | null>(null)
   const [envState, setEnvState] = useState<Record<string, string>>({})
@@ -639,6 +687,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
             </p>
           )}
           <BranchGraph branches={detail.branches} resources={detail.resources} envState={envState} />
+          <ManifestPanel api={api} projectId={projectId} />
           <DeployPanel api={api} projectId={projectId} branches={detail.branches} />
           <BranchesPanel
             branches={detail.branches}

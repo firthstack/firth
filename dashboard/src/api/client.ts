@@ -7,6 +7,12 @@ export class ApiError extends Error {
   }
 }
 
+export type ManifestEnv = {
+  name: string; default: boolean; cloneOf: string | null; wiring: string
+  databases: Array<{ name: string; engine: string; env: string }>
+  storage: Array<{ name: string; engine: string; shared: boolean; bucket: string }>
+  compute: Array<{ name: string; engine: string; url: string; state: string; uses: string[] }>
+}
 export type Fetcher = typeof fetch
 
 export class Api {
@@ -88,6 +94,9 @@ export class Api {
 
   getStatus(projectId: string): Promise<{ environments: Array<{ branchId: string; name: string; isDefault: boolean; state: string }> }> {
     return this.req('GET', `/projects/${projectId}/status`)
+  }
+  getManifest(projectId: string): Promise<{ project: string; environments: ManifestEnv[] }> {
+    return this.req('GET', `/projects/${projectId}/manifest`)
   }
   deployImage(projectId: string, image: string, port: number, branch?: string) {
     return this.req('POST', `/projects/${projectId}/deploy`, { image, port, branch })
