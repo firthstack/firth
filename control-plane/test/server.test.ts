@@ -508,7 +508,7 @@ test('POST /projects/:id/deploy-token mints an app-scoped token for the branch f
   expect(r.json()).toEqual({ token: 'FlyV1-for-a-main', expirySeconds: 1200, flyApp: 'a-main' })
 })
 
-test('POST /projects/:id/deploy-token 404 when the branch has no fly resource', async () => {
+test('POST /projects/:id/deploy-token provisions compute on demand and returns a token', async () => {
   const db = fakeData()
   db.tables.branches.push({ id: 'b-main', owner: 'uid-1', project_id: 'p1', name: 'main', is_default: true, neon_branch_ref: 'br-main', status: 'active' })
   const fly = {
@@ -520,8 +520,8 @@ test('POST /projects/:id/deploy-token 404 when the branch has no fly resource', 
   }
   const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [fly as any] })
   const r = await app.inject({ method: 'POST', url: '/projects/p1/deploy-token', headers: { authorization: 'Bearer good' }, payload: {} })
-  expect(r.statusCode).toBe(404)
-  expect(r.json().error).toMatch(/fly resource/)
+  expect(r.statusCode).toBe(200)
+  expect(r.json().token).toBe('x')
 })
 
 test('POST /projects/:id/deploy-token requires auth', async () => {

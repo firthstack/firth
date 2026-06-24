@@ -63,24 +63,22 @@ function flyAdapter(over: Partial<ProviderAdapter> = {}): ProviderAdapter & { pr
   } as any
 }
 
-test('branch create provisions a Fly app and records a fly resource with the new branch id', async () => {
+test('branch create is DB-only — no compute provisioned until first deploy', async () => {
   const db = seeded()
   const fly = flyAdapter()
   const { branch } = await new BranchService(db as any, cfg, [neonAdapter(), fly]).createBranch('o', 'p', 'feature')
-  expect(fly.provisioned).toEqual(['feature'])
+  expect(fly.provisioned).toEqual([])  // lazy: no Fly microVM at create
   const flyRow = db.tables.resources.find((r: any) => r.kind === 'fly' && r.branch_id === branch.id)
-  expect(flyRow).toBeTruthy()
-  expect(flyRow.status).toBe('active')
-  expect(flyRow.provider_ref).toEqual({ flyApp: 'a-feature', orgSlug: 'o' })
+  expect(flyRow).toBeFalsy()
+  // the Neon DB branch + creds still exist (the data environment)
+  expect(db.tables.branches.find((b: any) => b.id === branch.id)?.neon_branch_ref).toBeTruthy()
 })
 
-test('a failing Fly provision rolls back the Neon branch and marks the branch error', async () => {
+test('a failing Neon createBranch marks the branch error', async () => {
   const db = seeded()
-  const neon = neonAdapter()
-  const fly = flyAdapter({ async provision() { throw new Error('fly provision failed') } } as any)
-  await expect(new BranchService(db as any, cfg, [neon, fly]).createBranch('o', 'p', 'feature'))
-    .rejects.toThrow('fly provision failed')
-  expect(neon.deleted).toEqual(['br-new'])  // neon.createBranch returns 'br-new'
+  const neon = neonAdapter({ async createBranch() { throw new Error('neon createBranch failed') } } as any)
+  await expect(new BranchService(db as any, cfg, [neon, flyAdapter()]).createBranch('o', 'p', 'feature'))
+    .rejects.toThrow('neon createBranch failed')
   const row = db.tables.branches.find((b: any) => b.name === 'feature')
   expect(row.status).toBe('error')
 })
