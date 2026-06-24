@@ -171,8 +171,8 @@ function BranchGraph({ branches, resources, envState }: { branches: Branch[]; re
     rows.set(d, list)
   })
 
-  const NODE_W = 168
-  const NODE_H = 46
+  const NODE_W = 190
+  const NODE_H = 58
   const GAP_X = 28
   const GAP_Y = 64
   const PAD = 12
@@ -258,6 +258,9 @@ function BranchGraph({ branches, resources, envState }: { branches: Branch[]; re
                   {stLabel ? <tspan fill={stColor}>{stLabel}  </tspan> : null}
                   <tspan fill="var(--fg-dim)">{url ? url.replace(/^https:\/\//, '') : 'no compute'}</tspan>
                 </text>
+                <text x={x + 10} y={y + 51} fontSize={9.5} fontFamily="var(--mono)">
+                  <tspan fill="var(--green)">db</tspan><tspan fill="var(--fg-dim)"> branch · store </tspan><tspan fill="var(--fg-dim)">shared{url ? ' · compute' : ''}</tspan>
+                </text>
               </g>
             )
             return url ? (
@@ -273,6 +276,7 @@ function BranchGraph({ branches, resources, envState }: { branches: Branch[]; re
         <span style={{ color: 'var(--amber)' }}>💤 asleep · $0</span>{'   '}
         <span>○ stopped</span>{'  ·  idle environments scale to zero · click a node to open'}
       </p>
+      <p className="firth-dim">each environment is a full clone — its <b style={{ color: 'var(--fg)' }}>own Neon database branch</b> + <b style={{ color: 'var(--fg)' }}>own compute/URL</b>; the Tigris <b style={{ color: 'var(--fg)' }}>storage bucket is shared</b> across environments.</p>
     </Panel>
   )
 }
@@ -486,18 +490,33 @@ function ApprovalsPanel({ api, projectId }: { api: Api; projectId: string }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-function DeployPanel({ api, projectId }: { api: Api; projectId: string }) {
-  const [image, setImage] = useState('')
-  const [port, setPort] = useState('8080')
+const IMAGE_PRESETS = [
+  { label: 'Nginx — static web (nginx)', image: 'nginx:latest', port: '80' },
+  { label: 'Whoami — echo server (traefik/whoami)', image: 'traefik/whoami:latest', port: '80' },
+  { label: 'Hello — Fly demo (flyio/hellofly)', image: 'flyio/hellofly:latest', port: '8080' },
+  { label: 'Custom image…', image: '', port: '8080' },
+]
+const SELECT_STYLE: React.CSSProperties = {
+  fontFamily: 'inherit', fontSize: 14, color: 'var(--fg)', background: 'var(--bg-soft)',
+  border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px',
+}
+function DeployPanel({ api, projectId, branches }: { api: Api; projectId: string; branches: Branch[] }) {
+  const [preset, setPreset] = useState(0)
+  const [custom, setCustom] = useState('')
+  const [port, setPort] = useState('80')
+  const [target, setTarget] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const isCustom = preset === IMAGE_PRESETS.length - 1
+  const image = isCustom ? custom.trim() : IMAGE_PRESETS[preset].image
+  function pick(i: number) { setPreset(i); setPort(IMAGE_PRESETS[i].port) }
   async function go() {
-    if (!image.trim() || busy) return
+    if (!image || busy) return
     setBusy(true); setError(null); setResult(null)
     try {
-      const out = await api.deployImage(projectId, image.trim(), Number(port) || 8080)
-      setResult((out as any)?.url ?? 'deployed')
+      const out = await api.deployImage(projectId, image, Number(port) || 80, target || undefined)
+      setResult((out as { url?: string })?.url ?? 'deployed')
     } catch (e) { setError(e instanceof Error ? e.message : 'deploy failed') }
     finally { setBusy(false) }
   }
@@ -505,12 +524,25 @@ function DeployPanel({ api, projectId }: { api: Api; projectId: string }) {
     <Panel title="deploy">
       <CliHint command="firth deploy --image <url> --port <n>" note="# same deploy a human clicks or an agent runs via the firth skill" />
       <Row>
+        <label htmlFor="dep-env">to env</label>
+        <select id="dep-env" value={target} onChange={(e) => setTarget(e.target.value)} disabled={busy} style={SELECT_STYLE}>
+          {branches.map((b) => <option key={b.id} value={b.is_default ? '' : b.id}>{b.name}{b.is_default ? ' (default)' : ''}</option>)}
+        </select>
         <label htmlFor="dep-img">image</label>
-        <TInput id="dep-img" value={image} onChange={(e) => setImage(e.target.value)} placeholder="registry.fly.io/app:tag  or  docker.io/library/nginx" disabled={busy} />
+        <select id="dep-img" value={preset} onChange={(e) => pick(Number(e.target.value))} disabled={busy} style={SELECT_STYLE}>
+          {IMAGE_PRESETS.map((pr, i) => <option key={i} value={i}>{pr.label}</option>)}
+        </select>
         <label htmlFor="dep-port">port</label>
         <TInput id="dep-port" value={port} onChange={(e) => setPort(e.target.value)} disabled={busy} style={{ maxWidth: '8ch' }} />
-        <TButton onClick={go} disabled={busy}>{busy ? 'deploying…' : '[deploy]'}</TButton>
+        <TButton onClick={go} disabled={busy || !image}>{busy ? 'deploying…' : '[deploy]'}</TButton>
       </Row>
+      {isCustom && (
+        <Row>
+          <label htmlFor="dep-custom">image url</label>
+          <TInput id="dep-custom" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="registry.fly.io/app:tag  or  docker.io/library/nginx" disabled={busy} />
+        </Row>
+      )}
+      <p className="firth-dim">deploys a prebuilt image to the chosen environment (replaces its machine). build-from-source is the next step.</p>
       {result && <p className="firth-dim">deployed → <a href={result} target="_blank" rel="noreferrer" style={{ color: 'var(--green)' }}>{result}</a></p>}
       {error && <p className="firth-error">! {error}</p>}
     </Panel>
@@ -607,7 +639,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
             </p>
           )}
           <BranchGraph branches={detail.branches} resources={detail.resources} envState={envState} />
-          <DeployPanel api={api} projectId={projectId} />
+          <DeployPanel api={api} projectId={projectId} branches={detail.branches} />
           <BranchesPanel
             branches={detail.branches}
             resources={detail.resources}

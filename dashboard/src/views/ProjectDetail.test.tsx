@@ -44,7 +44,7 @@ describe('ProjectDetail', () => {
   it('renders branches and the default branch has no delete button', async () => {
     render(<ProjectDetail api={fakeApi()} projectId="p1" onBack={vi.fn()} />)
     expect(await screen.findByText('main')).toBeInTheDocument()
-    expect(screen.getByText('dev')).toBeInTheDocument()
+    expect(screen.getAllByText('dev').length).toBeGreaterThan(0)
     // exactly one [delete] button (for the non-default 'dev' branch)
     expect(screen.getAllByRole('button', { name: /delete/i })).toHaveLength(1)
   })
@@ -108,7 +108,7 @@ describe('ProjectDetail', () => {
   it('deleting a non-default branch calls deleteBranch', async () => {
     const deleteBranch = vi.fn(async () => ({}))
     render(<ProjectDetail api={fakeApi({ deleteBranch })} projectId="p1" onBack={vi.fn()} />)
-    await screen.findByText('dev')
+    await screen.findAllByText('dev')
     await userEvent.click(screen.getByRole('button', { name: /delete/i }))
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }))
     expect(deleteBranch).toHaveBeenCalledWith('p1', 'b2')
@@ -118,7 +118,7 @@ describe('ProjectDetail', () => {
     let finish!: () => void
     const deleteBranch = vi.fn(() => new Promise<unknown>((res) => { finish = () => res({}) }))
     render(<ProjectDetail api={fakeApi({ deleteBranch })} projectId="p1" onBack={vi.fn()} />)
-    await screen.findByText('dev')
+    await screen.findAllByText('dev')
     await userEvent.click(screen.getByRole('button', { name: /^\[delete\]$/i }))
     await userEvent.click(screen.getByRole('button', { name: /confirm/i }))
     expect(deleteBranch).toHaveBeenCalledTimes(1)
@@ -275,7 +275,7 @@ describe('ProjectDetail — branch visibility', () => {
 
   it('surfaces a half-created branch as not-yet-deployed and counts it as pending/failed', async () => {
     render(<ProjectDetail api={apiV()} projectId="p1" onBack={vi.fn()} />)
-    await screen.findByText('half-baked')
+    await screen.findAllByText('half-baked')
     // creating branch has no compute yet
     expect(screen.getAllByText(/no compute yet/i).length).toBeGreaterThanOrEqual(1)
     // header summary flags the one unhealthy branch
