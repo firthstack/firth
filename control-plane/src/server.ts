@@ -11,7 +11,7 @@ import { BranchService } from './services/branches.js'
 import { DeployService } from './services/deploy.js'
 import { TeardownService } from './services/teardown.js'
 import { publicResourceView } from './services/resource-view.js'
-import type { ProviderAdapter } from './adapters/types.js'
+import type { ProviderAdapter, ResourceHandle } from './adapters/types.js'
 import type { AuthProxy } from './insforge.js'
 
 export type ServerDeps = {
@@ -107,6 +107,27 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       .filter((r) => r.status !== 'destroyed')
       .map(publicResourceView)
     return reply.send({ project, branches, resources })
+  })
+
+  // Per-environment serverless runtime state (running / suspended / stopped / none).
+  // One Fly machine-list per branch app, in parallel. Powers the dashboard's live/asleep dots.
+  app.get('/projects/:id/status', async (req, reply) => {
+    const { uid, token, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const branches = await new BranchesRepo(db).listByProject(uid, projectId)
+    const resources = (await new ResourcesRepo(db).listByProject(uid, projectId)).filter((r) => r.status !== 'destroyed')
+    const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
+    const fly = adapters.find((a) => a.kind === 'fly') as (ProviderAdapter & { appState?: (h: ResourceHandle) => Promise<string> }) | undefined
+    const flyResources = resources.filter((r) => r.kind === 'fly')
+    const byBranch = new Map<string, any>()
+    for (const r of flyResources) byBranch.set((r.branch_id as string) ?? '__project__', r)
+    const environments = await Promise.all(branches.map(async (b) => {
+      const r = byBranch.get(b.id) ?? (b.is_default ? byBranch.get('__project__') : undefined)
+      let state = 'none'
+      if (r && fly?.appState) { try { state = await fly.appState({ kind: 'fly', providerRef: r.provider_ref }) } catch { state = 'unknown' } }
+      return { branchId: b.id, name: b.name, isDefault: b.is_default, state }
+    }))
+    return reply.send({ environments })
   })
 
   app.delete('/projects/:id', async (req, reply) => {

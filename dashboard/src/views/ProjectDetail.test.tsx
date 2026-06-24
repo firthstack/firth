@@ -316,7 +316,7 @@ describe('ProjectDetail — branch graph (visual)', () => {
 
   it('renders an svg graph with a node per branch and parent links to child urls', async () => {
     const { container } = render(<ProjectDetail api={apiG()} projectId="p1" onBack={vi.fn()} />)
-    await screen.findByText('branch graph')
+    await screen.findByText('environments')
     const svg = container.querySelector('svg[aria-label="branch fork graph"]')
     expect(svg).toBeTruthy()
     // one edge path per non-root branch (feat-a + feat-b = 2)

@@ -123,7 +123,7 @@ export class FlyAdapter implements ComputeAdapter {
   async mintCredentials(): Promise<SecretBundle> { return {} }
   async readUsage(): Promise<UsageSnapshot> { return {} }
 
-  private async listMachines(flyApp: string): Promise<Array<{ id?: string }>> {
+  private async listMachines(flyApp: string): Promise<Array<{ id?: string; state?: string }>> {
     const data = await this.call('GET', `/apps/${flyApp}/machines`)
     if (Array.isArray(data)) return data
     if (Array.isArray(data?.machines)) return data.machines
@@ -132,6 +132,19 @@ export class FlyAdapter implements ComputeAdapter {
 
   private async destroyMachine(flyApp: string, id: string): Promise<void> {
     await this.call('DELETE', `/apps/${flyApp}/machines/${id}?force=true`)
+  }
+
+  // Serverless runtime state for the env: 'running' if any machine is started,
+  // 'suspended'/'stopped' when scaled to zero, 'none' if not deployed yet.
+  async appState(handle: ResourceHandle): Promise<string> {
+    const ref = handle.providerRef as FlyRef
+    let states: string[] = []
+    try { states = (await this.listMachines(ref.flyApp)).map((m) => (m.state ?? '').toLowerCase()) }
+    catch { return 'unknown' }
+    if (states.some((x) => x === 'started')) return 'running'
+    if (states.some((x) => x === 'suspended')) return 'suspended'
+    if (states.some((x) => x === 'stopped' || x === 'created')) return 'stopped'
+    return 'none'
   }
 
   async mintDeployToken(handle: ResourceHandle, opts: { expirySeconds: number }): Promise<{ token: string; expirySeconds: number }> {
