@@ -8,7 +8,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export type FlyRef = { flyApp: string; orgSlug: string }
 
 export function mkAppName(projectName: string, rand: string): string {
-  const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30) || 'app'
+  const slug = projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 15) || 'app'
   return `firth-${slug}-${rand}`
 }
 

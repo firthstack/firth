@@ -180,6 +180,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // composable "+ Add machine / + Add database" action. Provisions independently.
   app.post('/projects/:id/resources', async (req, reply) => {
     const { uid, token, db } = await auth(req)
+   try {
     const projectId = (req.params as any).id
     const { kind, env: envName, name } = (req.body as any) ?? {}
     if (kind !== 'compute' && kind !== 'database') return reply.code(400).send({ error: 'kind must be compute | database' })
@@ -212,6 +213,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const res = await db.from('resources').insert({ project_id: projectId, owner: uid, kind: 'neon', branch_id: target.id, provider_ref: { neonBranchRef: ref, name: safe }, status: 'active' }).select()
     if (res.error) throw res.error
     return reply.send({ ok: true, kind: 'database', name: safe, env: envKey })
+   } catch (e) {
+    const msg = e instanceof Error ? e.message : 'add resource failed'
+    console.error('add-resource failed:', msg)
+    return reply.code(502).send({ error: msg })
+   }
   })
 
   app.delete('/projects/:id', async (req, reply) => {
