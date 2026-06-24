@@ -780,6 +780,7 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
           <TButton onClick={() => copyText(`firth project link ${projectId}`)} style={{ flexShrink: 0 }}>[copy]</TButton>
         </div>
         <div className="firth-dim" style={{ fontSize: 11, marginTop: 7, fontFamily: 'var(--mono)' }}>then: firth secrets · firth deploy . --port 8080 · firth manifest</div>
+        <div style={{ fontSize: 12, marginTop: 9, color: 'var(--green)' }}>→ then just tell your coding agent <span style={{ color: 'var(--fg)' }}>what you want to build</span> — it has the firth skill and this project's context.</div>
       </div>
       {loading && <p className="firth-dim">loading...</p>}
       {error && <p className="firth-error">! {error}</p>}
