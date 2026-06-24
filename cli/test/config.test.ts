@@ -26,6 +26,17 @@ test('project link round-trips', () => {
   expect(readProjectLink(cwd)?.projectId).toBe('proj-123')
 })
 
+test('writeProjectLink gitignores .firth/ so git checkout cannot revert the branch', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'firth-proj-'))
+  writeProjectLink('proj-gi', cwd)
+  const gi = readFileSync(join(cwd, '.gitignore'), 'utf8')
+  expect(gi).toMatch(/^\.firth\/$/m)
+  // idempotent: re-linking does not duplicate the entry
+  writeProjectLink('proj-gi', cwd)
+  const lines = readFileSync(join(cwd, '.gitignore'), 'utf8').split('\n').filter((l) => l.trim() === '.firth/')
+  expect(lines.length).toBe(1)
+})
+
 test('setCurrentBranch preserves projectId + adds branch', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'firth-proj-'))
   writeProjectLink('proj-abc', cwd)

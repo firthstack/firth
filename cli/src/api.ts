@@ -73,7 +73,7 @@ export class FirthApi {
   listApprovals(projectId: string, status?: string): Promise<any[]> {
     return this.req('GET', `/projects/${projectId}/approvals${status ? `?status=${status}` : ''}`).then((r) => r.approvals)
   }
-  approve(projectId: string, id: string) { return this.req('POST', `/projects/${projectId}/approvals/${id}/approve`).then((r) => r.approval) }
+  approve(projectId: string, id: string, always = false) { return this.req('POST', `/projects/${projectId}/approvals/${id}/approve`, { always }).then((r) => r.approval) }
   deny(projectId: string, id: string) { return this.req('POST', `/projects/${projectId}/approvals/${id}/deny`).then((r) => r.approval) }
   getPolicy(projectId: string): Promise<Record<string, string>> { return this.req('GET', `/projects/${projectId}/policy`).then((r) => r.policy) }
   setPolicy(projectId: string, action: string, decision: string): Promise<Record<string, string>> {

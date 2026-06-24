@@ -1,7 +1,7 @@
 {
   "name": "firth",
-  "version": "0.0.7",
-  "description": "The Firth CLI \u2014 provision and govern a project's cloud resources (Neon Postgres, Tigris storage, Fly.io compute) behind one credential seam.",
+  "version": "0.0.8",
+  "description": "The Firth CLI — provision and govern a project's cloud resources (Neon Postgres, Tigris storage, Fly.io compute) behind one credential seam.",
   "type": "module",
   "bin": {
     "firth": "dist/index.js"

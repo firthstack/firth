@@ -54,7 +54,7 @@ Commands:
   branch switch <name>      Set the current branch (secrets/events default to it)
   branch delete <name>      Delete a branch + its Neon branch (--yes)
   approvals                 List pending approvals
-  approve <id>              Approve a pending request
+  approve <id> [--always]   Approve a request (--always: set policy to allow, stop asking)
   deny <id>                 Deny a pending request
   policy [set <a> <d>]      Show or set the project's govern policy
   --help                    Show this help

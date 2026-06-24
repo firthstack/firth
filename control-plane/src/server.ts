@@ -347,8 +347,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.post('/projects/:id/approvals/:aid/approve', async (req, reply) => {
     const { uid, db } = await auth(req)
-    const approval = await new GovernService(db).decide(uid, (req.params as any).id, (req.params as any).aid, 'granted')
-    return reply.send({ approval })
+    const projectId = (req.params as any).id
+    const always = !!((req.body as any) ?? {}).always
+    const svc = new GovernService(db)
+    const approval = await svc.decide(uid, projectId, (req.params as any).aid, 'granted')
+    // `always`: persist consent so this action stops prompting. Grants are single-use
+    // (consumed per gate), so without this every repeat re-prompts; flipping the policy
+    // rule to `allow` is the durable "approve and don't ask again".
+    if (always && isGatedAction(approval.action)) {
+      await svc.setRule(uid, projectId, approval.action, 'allow')
+      await emit(db, uid, projectId, null, 'govern.policy', { action: approval.action, decision: 'allow', via: 'approve --always' })
+    }
+    return reply.send({ approval, always })
   })
 
   app.post('/projects/:id/approvals/:aid/deny', async (req, reply) => {
