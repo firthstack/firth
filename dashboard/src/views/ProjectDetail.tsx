@@ -561,11 +561,12 @@ const RESGRID: React.CSSProperties = { display: 'grid', gridTemplateColumns: 're
 const RESCARD: React.CSSProperties = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 9, padding: '10px 12px', minHeight: 86 }
 const ICO: Record<string, string> = { db: '🗄', storage: '🪣', machine: '▲', add: '＋' }
 
-function ResCard({ icon, title, sub, state, url, action }: { icon: string; title: string; sub: string; state?: string; url?: string | null; action?: React.ReactNode }) {
+function ResCard({ icon, title, sub, state, url, action, detail }: { icon: string; title: string; sub: string; state?: string; url?: string | null; action?: React.ReactNode; detail?: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
   const stColor = state === 'running' ? 'var(--green)' : (state === 'suspended' || state === 'stopped') ? 'var(--amber)' : state === 'none' ? 'var(--fg-dim)' : 'var(--fg-dim)'
   const stLabel = state === 'running' ? '● live' : state === 'suspended' ? '💤 asleep' : state === 'stopped' ? '○ stopped' : state === 'none' ? '○ no machine' : ''
   return (
-    <div style={RESCARD}>
+    <div style={{ ...RESCARD, cursor: detail ? "pointer" : "default" }} onClick={() => detail && setOpen((o) => !o)} title={detail ? "click for details" : undefined}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 15 }}>{icon}</span>
         <strong style={{ fontFamily: 'var(--mono)' }}>{title}</strong>
@@ -574,6 +575,7 @@ function ResCard({ icon, title, sub, state, url, action }: { icon: string; title
       <div className="firth-dim" style={{ fontSize: 12, fontFamily: 'var(--mono)', marginTop: 6 }}>{sub}</div>
       {url && <div style={{ marginTop: 6, overflow: 'hidden' }}><a href={url} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontSize: 12, fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{url.replace(/^https:\/\//, '')}</a></div>}
       {action && <div style={{ marginTop: 8 }}>{action}</div>}
+      {open && detail && <div style={{ marginTop: 8, borderTop: '1px dashed var(--border)', paddingTop: 8, fontSize: 11, fontFamily: 'var(--mono)', color: 'var(--fg-dim)' }}>{detail}</div>}
     </div>
   )
 }
@@ -631,13 +633,13 @@ function EnvBoard({ api, projectId, onChanged }: { api: Api; projectId: string; 
 
           <div style={RESGRID}>
             {e.databases.map((d) => (
-              <ResCard key={`db-${d.name}`} icon={ICO.db} title={d.name} sub={`${d.engine} → ${d.env}`} />
+              <ResCard key={`db-${d.name}`} icon={ICO.db} title={d.name} sub={`${d.engine} → ${d.env}`} detail={<>connect via <code>{d.env}</code> — in this env&apos;s secrets / .env<br/>engine: {d.engine}</>} />
             ))}
             {e.storage.map((s) => (
-              <ResCard key={`st-${s.name}`} icon={ICO.storage} title={s.name} sub={`${s.engine}${s.shared ? ' · shared' : ''}`} />
+              <ResCard key={`st-${s.name}`} icon={ICO.storage} title={s.name} sub={`${s.engine}${s.shared ? ' · shared' : ''}`} detail={<>bucket: {s.bucket}<br/>{s.shared ? 'shared across all environments' : 'dedicated'}</>} />
             ))}
             {e.compute.length ? e.compute.map((c) => (
-              <ResCard key={`cp-${c.name}`} icon={ICO.machine} title={c.name} sub="fly-machine" state={c.state} url={c.url} />
+              <ResCard key={`cp-${c.name}`} icon={ICO.machine} title={c.name} sub="fly-machine" state={c.state} url={c.url} detail={<>state: {c.state}<br/>uses: {c.uses.join(', ') || '—'}<br/>shared-cpu-1x · 256 MB · scales to zero</>} />
             )) : (
               <ResCard icon={ICO.machine} title="machine" sub="none yet — add one" state="none" />
             )}
