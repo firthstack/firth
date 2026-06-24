@@ -130,6 +130,49 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.send({ environments })
   })
 
+  // Env manifest — an agent-legible description of each environment's resources
+  // (databases / storage / compute) and how they wire (public-url). Arrays so
+  // "multiple compute, add a db" is native. Derived from the live resources.
+  app.get('/projects/:id/manifest', async (req, reply) => {
+    const { uid, token, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const project = await new ProjectsRepo(db).findById(uid, projectId)
+    if (!project) throw new NotFoundError('project not found')
+    const branches = await new BranchesRepo(db).listByProject(uid, projectId)
+    const resources = (await new ResourcesRepo(db).listByProject(uid, projectId)).filter((r) => r.status !== 'destroyed')
+    const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
+    const fly = adapters.find((a) => a.kind === 'fly') as (ProviderAdapter & { appState?: (h: ResourceHandle) => Promise<string> }) | undefined
+
+    const nameById = new Map(branches.map((b) => [b.id, b.name]))
+    const s3 = resources.find((r) => r.kind === 's3')
+    const storage = s3
+      ? [{ name: 'assets', engine: 'tigris-s3', bucket: String((s3.provider_ref as any).bucket ?? (s3.provider_ref as any).bucketName ?? ''), shared: true, env: ['BUCKET_NAME', 'AWS_ENDPOINT_URL_S3', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION'] }]
+      : []
+    const flyByBranch = new Map<string, any>()
+    for (const r of resources) if (r.kind === 'fly') flyByBranch.set((r.branch_id as string) ?? '__project__', r)
+
+    const environments = await Promise.all(branches.map(async (b) => {
+      const flyR = flyByBranch.get(b.id) ?? (b.is_default ? flyByBranch.get('__project__') : undefined)
+      const flyApp = flyR ? String((flyR.provider_ref as any).flyApp ?? '') : ''
+      let state = 'none'
+      if (flyR && fly?.appState) { try { state = await fly.appState({ kind: 'fly', providerRef: flyR.provider_ref }) } catch { state = 'unknown' } }
+      const databases = b.neon_branch_ref
+        ? [{ name: 'primary', engine: 'neon-postgres', ref: b.neon_branch_ref, env: 'DATABASE_URL' }]
+        : []
+      const compute = flyApp
+        ? [{ name: 'app', engine: 'fly-machine', url: `https://${flyApp}.fly.dev`, state, uses: [...databases.map((d) => d.name), ...storage.map((x) => x.name)] }]
+        : []
+      return {
+        name: b.name,
+        default: b.is_default,
+        cloneOf: b.parent_branch_id ? (nameById.get(b.parent_branch_id) ?? null) : null,
+        databases, storage, compute,
+        wiring: 'public-url',
+      }
+    }))
+    return reply.send({ project: project.name, environments })
+  })
+
   app.delete('/projects/:id', async (req, reply) => {
     const { uid, token, db } = await auth(req)
     const projectId = (req.params as any).id

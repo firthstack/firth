@@ -13,7 +13,7 @@ Firth provisions and governs a project's cloud resources behind one CLI and one 
 **Setup:** `firth login --email <e> --password <p>` → `firth project create <name>` (provisions all three) or `firth project link <id>`. You land linked (`./.firth/project.json`) on branch `main`. `firth status` shows login + linked project + current branch. `firth secrets` writes all three resources' credentials into `./.env` for local dev.
 
 ## Core principle
-**One unit of work = one branch = one isolated env.** `firth branch create` gives each feature, experiment, or agent task its own Neon DB branch (copy-on-write copy of the data) + its own compute + its own URL, all running in parallel. **Don't develop on `main`; don't pile multiple features on one branch.**
+**One unit of work = one branch = one isolated env.** `firth branch create` gives each feature, experiment, or agent task its own Neon DB branch (copy-on-write copy of the data); its own compute + URL spin up on its first `firth deploy`. All run in parallel. **Don't develop on `main`; don't pile multiple features on one branch.**
 
 **Multiple independent features (or agent tasks) at once?** Give each its own branch **and its own subagent** — with an isolated DB + compute + URL per branch, they build, deploy, and test fully in parallel with zero collision. This is the recommended way to parallelize agent work — see **workflow.md → Running multiple agents in parallel**.
 
