@@ -2,7 +2,7 @@
 
 > One control plane for a project's cloud resources. Firth provisions a Postgres database, S3-compatible storage, and compute for your project, and hands them back through a single CLI and one credential file — so you (or your AI agent) can build against real infrastructure without wiring up each provider by hand.
 
-**Status:** Early WIP — usable end to end (provision, secrets, branching, deploy), not yet hardened for production.
+**Status:** Early WIP — usable end to end (provision, secrets, branching, serverless deploy, web dashboard), not yet hardened for production.
 
 ---
 
@@ -17,8 +17,11 @@ Create a project and Firth automatically provisions three base resources, ready 
 On top of those resources:
 
 - **Unified secrets** — one `firth secrets` writes every connection credential into a local `.env`. Credentials are never hardcoded into your app or your agent.
-- **Branching** — each branch gets its **own isolated database and its own compute** (the storage bucket is shared), so you can make risky changes in isolation and merge back when verified.
-- **Deploy** — ship a container image to the current branch's compute with one command.
+- **Branching = environments** — each branch is an isolated **database environment** (copy-on-write copy of the parent's data). Its **compute is provisioned on first deploy** (the storage bucket is shared). Spin up an isolated stack per feature, agent task, tenant, or preview.
+- **Serverless** — each branch's compute **suspends when idle (scales to zero)** and wakes on the next request, so idle environments cost nothing.
+- **Deploy** — ship a container image to a branch's compute with one command; the Fly microVM is created on demand.
+- **Manifest** — `firth manifest` prints an agent-legible view of each environment's databases / storage / compute and how they wire (over public URLs).
+- **Dashboard** — a web UI to browse your environments (live/asleep status, URLs, the fork graph), deploy images, and manage branches.
 - **Observability** — a timeline of agent actions correlated with resource side-effects, per project and branch.
 
 Firth talks to the providers under its own accounts and passes resource cost through — you manage everything through Firth, not through each provider's console.
@@ -58,12 +61,12 @@ You connect **directly** to the Postgres database using the `DATABASE_URL` from 
 Before a high-risk change (a schema migration, a data backfill, a risky refactor), do the work on a branch and merge it back when you're confident.
 
 ```bash
-firth branch create my-change   # new isolated DB branch + its own compute (storage stays shared)
+firth branch create my-change   # new isolated DB environment (compute is provisioned on its first deploy; storage stays shared)
 firth branch switch my-change   # then `firth secrets` to refresh ./.env for this branch
 # ... run migrations against the branch DB, firth deploy, validate ...
 ```
 
-Each branch has its own compute app, so multiple branches run in parallel without disturbing each other.
+Each branch gets its own compute (on first deploy) and its own URL, so multiple branches run in parallel without disturbing each other. Idle branch compute scales to zero.
 
 **Merging is done in your own code repo** (Firth does not auto-merge): merge the branch's code and its migration files into `main`, switch back (`firth branch switch main` → `firth secrets`), re-run the migrations against `main`'s database, and redeploy.
 
