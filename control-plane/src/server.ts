@@ -292,7 +292,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!(await gateOrReply(db, uid, projectId, 'deploy', branch ?? null, reply))) return
     const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
     const out = await new DeployService(db, deps.cfg, adapters).deploy(uid, projectId, {
-      image: body.image, from: branch, port: body.port,
+      image: body.image, from: branch, port: body.port, machine: body.machine,
     })
     await emit(db, uid, projectId, branch ?? null, 'deploy', { machineId: out.machineId, url: out.url })
     return reply.send(out)

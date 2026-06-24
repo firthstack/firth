@@ -580,6 +580,39 @@ function ResCard({ icon, title, sub, state, url, action, detail }: { icon: strin
   )
 }
 
+function MachineDeploy({ api, projectId, env, machine, onDeployed }: { api: Api; projectId: string; env: string; machine: string; onDeployed: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [preset, setPreset] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  async function go(ev: React.MouseEvent) {
+    ev.stopPropagation()
+    setBusy(true); setMsg(null)
+    try {
+      const pr = IMAGE_PRESETS[preset]
+      await api.deployImage(projectId, pr.image, Number(pr.port) || 80, env, machine)
+      setMsg('deployed ✓'); onDeployed()
+    } catch (e) { setMsg(e instanceof Error ? e.message : 'deploy failed') }
+    finally { setBusy(false) }
+  }
+  return (
+    <div onClick={(e) => e.stopPropagation()}>
+      {open ? (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select value={preset} onChange={(e) => setPreset(Number(e.target.value))} disabled={busy} style={{ ...SELECT_STYLE, fontSize: 11, padding: '3px 6px' }}>
+            {IMAGE_PRESETS.slice(0, 3).map((pr, i) => <option key={i} value={i}>{pr.label.split(' —')[0]}</option>)}
+          </select>
+          <TButton onClick={go} disabled={busy}>{busy ? '…' : 'go'}</TButton>
+          <TButton onClick={(e) => { e.stopPropagation(); setOpen(false) }} disabled={busy}>x</TButton>
+        </div>
+      ) : (
+        <TButton onClick={(e) => { e.stopPropagation(); setOpen(true) }}>deploy image ▾</TButton>
+      )}
+      {msg && <div style={{ fontSize: 10, marginTop: 4, color: msg.includes('✓') ? 'var(--green)' : 'var(--red)' }}>{msg}</div>}
+    </div>
+  )
+}
+
 function EnvBoard({ api, projectId, onChanged }: { api: Api; projectId: string; onChanged: () => void }) {
   const [envs, setEnvs] = useState<ManifestEnv[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -639,7 +672,7 @@ function EnvBoard({ api, projectId, onChanged }: { api: Api; projectId: string; 
               <ResCard key={`st-${s.name}`} icon={ICO.storage} title={s.name} sub={`${s.engine}${s.shared ? ' · shared' : ''}`} detail={<>status: ● active<br/>bucket: {s.bucket}<br/>{s.shared ? 'shared across all environments' : 'dedicated'} · S3-compatible</>} />
             ))}
             {e.compute.length ? e.compute.map((c) => (
-              <ResCard key={`cp-${c.name}`} icon={ICO.machine} title={c.name} sub="fly-machine" state={c.state} url={c.url} detail={<>status: {c.state === 'running' ? '● live (running)' : c.state === 'suspended' ? '💤 asleep — scaled to $0' : c.state === 'stopped' ? '○ stopped' : '○ no machine yet'}<br/>spec: shared-cpu-1x · 1 vCPU · 256 MB<br/>scaling: scale-to-zero (suspends when idle, wakes ~250ms) — not autoscale<br/>uses: {c.uses.join(', ') || '—'}</>} />
+              <ResCard key={`cp-${c.name}`} icon={ICO.machine} title={c.name} sub="fly-machine" state={c.state} url={c.url} action={<MachineDeploy api={api} projectId={projectId} env={e.name} machine={c.url.replace(/^https:\/\//, '').replace(/\.fly\.dev$/, '')} onDeployed={load} />} detail={<>status: {c.state === 'running' ? '● live (running)' : c.state === 'suspended' ? '💤 asleep — scaled to $0' : c.state === 'stopped' ? '○ stopped' : '○ no machine yet'}<br/>spec: shared-cpu-1x · 1 vCPU · 256 MB<br/>scaling: scale-to-zero (suspends when idle, wakes ~250ms) — not autoscale<br/>uses: {c.uses.join(', ') || '—'}</>} />
             )) : (
               <ResCard icon={ICO.machine} title="machine" sub="none yet — add one" state="none" />
             )}
@@ -739,6 +772,11 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
         <TButton onClick={onBack}>[&lt; back]</TButton>
         <span>{detail?.project.name ?? projectId}</span>
         <span className="firth-dim">{detail?.project.status ?? ''}</span>
+      </Row>
+      <Row>
+        <span className="firth-dim">use from CLI / agent →</span>
+        <code style={{ fontFamily: 'inherit', color: 'var(--green)', overflow: 'hidden', textOverflow: 'ellipsis' }}>firth project link {projectId}</code>
+        <TButton onClick={() => copyText(`firth project link ${projectId}`)}>[copy]</TButton>
       </Row>
       {loading && <p className="firth-dim">loading...</p>}
       {error && <p className="firth-error">! {error}</p>}

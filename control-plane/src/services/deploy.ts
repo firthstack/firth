@@ -23,7 +23,7 @@ export class DeployService {
     return handle
   }
 
-  async deploy(owner: string, projectId: string, opts: { image: string; from?: string; port?: number }): Promise<DeployResult> {
+  async deploy(owner: string, projectId: string, opts: { image: string; from?: string; port?: number; machine?: string }): Promise<DeployResult> {
     const fly = this.adapters.find((a) => a.kind === 'fly') as ComputeAdapter | undefined
     if (!fly?.deploy) throw new Error('fly adapter not configured')
 
@@ -34,7 +34,16 @@ export class DeployService {
       : (all.find((b) => b.is_default) ?? all[0])
     if (!target) throw new Error(`branch "${opts.from ?? '(default)'}" not found`)
 
-    const handle = await this.ensureCompute(owner, projectId, target.id, target.name, fly)
+    let handle: ResourceHandle
+    if (opts.machine) {
+      // deploy to a SPECIFIC machine (fly app), not the env's primary
+      const resources = await new ResourcesRepo(this.db).listByProject(owner, projectId)
+      const r = resources.find((x) => x.kind === 'fly' && x.branch_id === target.id && x.status !== 'destroyed' && String((x.provider_ref as { flyApp?: string }).flyApp) === opts.machine)
+      if (!r) throw new Error(`machine '${opts.machine}' not found in environment '${target.name}'`)
+      handle = { kind: 'fly', providerRef: r.provider_ref }
+    } else {
+      handle = await this.ensureCompute(owner, projectId, target.id, target.name, fly)
+    }
 
     const secrets = new SecretsRepo(this.db)
     const rows = [
