@@ -633,13 +633,13 @@ function EnvBoard({ api, projectId, onChanged }: { api: Api; projectId: string; 
 
           <div style={RESGRID}>
             {e.databases.map((d) => (
-              <ResCard key={`db-${d.name}`} icon={ICO.db} title={d.name} sub={`${d.engine} → ${d.env}`} detail={<>connect via <code>{d.env}</code> — in this env&apos;s secrets / .env<br/>engine: {d.engine}</>} />
+              <ResCard key={`db-${d.name}`} icon={ICO.db} title={d.name} sub={`${d.engine} → ${d.env}`} detail={<>status: ● active<br/>engine: {d.engine} — Neon serverless (autoscales + scales to zero)<br/>connect via <code>{d.env}</code></>} />
             ))}
             {e.storage.map((s) => (
-              <ResCard key={`st-${s.name}`} icon={ICO.storage} title={s.name} sub={`${s.engine}${s.shared ? ' · shared' : ''}`} detail={<>bucket: {s.bucket}<br/>{s.shared ? 'shared across all environments' : 'dedicated'}</>} />
+              <ResCard key={`st-${s.name}`} icon={ICO.storage} title={s.name} sub={`${s.engine}${s.shared ? ' · shared' : ''}`} detail={<>status: ● active<br/>bucket: {s.bucket}<br/>{s.shared ? 'shared across all environments' : 'dedicated'} · S3-compatible</>} />
             ))}
             {e.compute.length ? e.compute.map((c) => (
-              <ResCard key={`cp-${c.name}`} icon={ICO.machine} title={c.name} sub="fly-machine" state={c.state} url={c.url} detail={<>state: {c.state}<br/>uses: {c.uses.join(', ') || '—'}<br/>shared-cpu-1x · 256 MB · scales to zero</>} />
+              <ResCard key={`cp-${c.name}`} icon={ICO.machine} title={c.name} sub="fly-machine" state={c.state} url={c.url} detail={<>status: {c.state === 'running' ? '● live (running)' : c.state === 'suspended' ? '💤 asleep — scaled to $0' : c.state === 'stopped' ? '○ stopped' : '○ no machine yet'}<br/>spec: shared-cpu-1x · 1 vCPU · 256 MB<br/>scaling: scale-to-zero (suspends when idle, wakes ~250ms) — not autoscale<br/>uses: {c.uses.join(', ') || '—'}</>} />
             )) : (
               <ResCard icon={ICO.machine} title="machine" sub="none yet — add one" state="none" />
             )}
