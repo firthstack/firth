@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Panel, Row, TButton, TInput, Confirm, CliHint } from '../ui/Terminal'
+import { Panel, Row, TButton, TInput, Confirm } from '../ui/Terminal'
 import type { Api } from '../api/client'
 import type { ProjectDetail as Detail, Resource, Branch } from '../types'
 import type { ManifestEnv } from '../api/client'
@@ -322,21 +322,22 @@ function BranchesPanel({
   return (
     <Panel title="branches">
       <Row>
-        <TButton onClick={() => setCreating((c) => !c)}>[+ create branch]</TButton>
+        <TButton onClick={() => setCreating((c) => !c)}>[⎘ Clone environment]</TButton>
         <span style={{ flex: 1 }} />
         <span className="firth-dim">{total} total</span>
         <span style={{ color: 'var(--green)' }}>{active} active</span>
         {unhealthy > 0 && <span style={{ color: 'var(--amber)' }}>{unhealthy} pending/failed</span>}
       </Row>
-      <CliHint command="firth branch create <name>" note="# forks an isolated db branch + its own compute & url" />
-      <p className="firth-dim">each branch = isolated Neon branch + its own Fly machine (shared-cpu-1x · 256 MB) at its own url</p>
+      <p className="firth-dim">an environment is a <b style={{ color: 'var(--fg)' }}>copy-on-write clone</b> — its own Neon database branch + (on first deploy) its own machine + URL; storage is shared.</p>
       {creating && (
         <Row>
-          <label htmlFor="branch-name">name</label>
-          <TInput id="branch-name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} />
-          <label htmlFor="branch-from">from</label>
-          <TInput id="branch-from" value={from} onChange={(e) => setFrom(e.target.value)} disabled={busy} />
-          <TButton onClick={onCreate} disabled={busy}>{busy ? 'creating…' : '[ok]'}</TButton>
+          <label htmlFor="branch-from">clone of</label>
+          <select id="branch-from" value={from} onChange={(e) => setFrom(e.target.value)} disabled={busy} style={SELECT_STYLE}>
+            {branches.map((b) => <option key={b.id} value={b.name}>{b.name}{b.is_default ? ' (default)' : ''}</option>)}
+          </select>
+          <label htmlFor="branch-name">new env</label>
+          <TInput id="branch-name" value={name} onChange={(e) => setName(e.target.value)} disabled={busy} placeholder="e.g. preview-42" />
+          <TButton onClick={onCreate} disabled={busy}>{busy ? 'cloning…' : '[clone]'}</TButton>
           <TButton onClick={() => { setCreating(() => false); setName(''); setFrom('main') }} disabled={busy}>[cancel]</TButton>
         </Row>
       )}
@@ -522,8 +523,7 @@ function DeployPanel({ api, projectId, branches }: { api: Api; projectId: string
     finally { setBusy(false) }
   }
   return (
-    <Panel title="deploy">
-      <CliHint command="firth deploy --image <url> --port <n>" note="# same deploy a human clicks or an agent runs via the firth skill" />
+    <Panel title="deploy a machine">
       <Row>
         <label htmlFor="dep-env">to env</label>
         <select id="dep-env" value={target} onChange={(e) => setTarget(e.target.value)} disabled={busy} style={SELECT_STYLE}>
@@ -543,7 +543,7 @@ function DeployPanel({ api, projectId, branches }: { api: Api; projectId: string
           <TInput id="dep-custom" value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="registry.fly.io/app:tag  or  docker.io/library/nginx" disabled={busy} />
         </Row>
       )}
-      <p className="firth-dim">deploys a prebuilt image to the chosen environment (replaces its machine). build-from-source is the next step.</p>
+      <p className="firth-dim">runs a prebuilt image as the machine for the chosen environment (replaces its current one). build-from-source is the next step.</p>
       {result && <p className="firth-dim">deployed → <a href={result} target="_blank" rel="noreferrer" style={{ color: 'var(--green)' }}>{result}</a></p>}
       {error && <p className="firth-error">! {error}</p>}
     </Panel>
@@ -563,7 +563,6 @@ function ManifestPanel({ api, projectId }: { api: Api; projectId: string }) {
   const kind = (k: string) => <span className="firth-dim" style={{ minWidth: '9ch', flexShrink: 0 }}>{k}</span>
   return (
     <Panel title="manifest">
-      <CliHint command="firth manifest" note="# the agent-legible env spec — databases / storage / compute + wiring" />
       {envs.map((e) => (
         <div key={e.name} style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
           <Row>
@@ -674,7 +673,6 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
         <span>{detail?.project.name ?? projectId}</span>
         <span className="firth-dim">{detail?.project.status ?? ''}</span>
       </Row>
-      <CliHint command={`firth project link ${projectId}`} note="# link this directory to the project" />
       {loading && <p className="firth-dim">loading...</p>}
       {error && <p className="firth-error">! {error}</p>}
       {detail && (
