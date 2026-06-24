@@ -621,6 +621,29 @@ test('approve with Content-Type: application/json and an empty body still succee
   expect(db.tables.approvals[0].status).toBe('granted')
 })
 
+test('approve --always grants AND sets the action policy to allow (durable consent)', async () => {
+  const db = fakeData()
+  db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'p1', action: 'secrets.read', status: 'pending', requested_at: 'now', decided_at: null })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const ap = await app.inject({ method: 'POST', url: '/projects/p1/approvals/a1/approve', headers: { authorization: 'Bearer good', 'content-type': 'application/json' }, payload: { always: true } })
+  expect(ap.statusCode).toBe(200)
+  expect(ap.json().always).toBe(true)
+  expect(db.tables.approvals[0].status).toBe('granted')
+  // policy rule now allows secrets.read so future gates pass without prompting
+  const rule = db.tables.governance_rules.find((r: any) => r.action === 'secrets.read' && r.project_id === 'p1')
+  expect(rule?.decision).toBe('allow')
+  expect(db.tables.events.map((e: any) => e.kind)).toContain('govern.policy')
+})
+
+test('approve without always does NOT change policy (grant stays single-use)', async () => {
+  const db = fakeData()
+  db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'p1', action: 'secrets.read', status: 'pending', requested_at: 'now', decided_at: null })
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any })
+  const ap = await app.inject({ method: 'POST', url: '/projects/p1/approvals/a1/approve', headers: { authorization: 'Bearer good', 'content-type': 'application/json' }, payload: {} })
+  expect(ap.statusCode).toBe(200)
+  expect(db.tables.governance_rules.find((r: any) => r.action === 'secrets.read')).toBeUndefined()
+})
+
 test('approvals: deny flips to denied + emits govern.denied', async () => {
   const db = fakeData()
   db.tables.approvals.push({ id: 'a1', owner: 'uid-1', project_id: 'p1', action: 'project.delete', status: 'pending', requested_at: 'now', decided_at: null })

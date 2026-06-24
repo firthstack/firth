@@ -29,10 +29,13 @@ export async function approvals(_argv: string[], deps: Deps): Promise<number> {
 }
 
 export async function approve(argv: string[], deps: Deps): Promise<number> {
-  const id = argv[0]; if (!id) { deps.print('usage: firth approve <id>'); return 1 }
+  const always = argv.includes('--always')
+  const id = argv.find((a) => !a.startsWith('-'))
+  if (!id) { deps.print('usage: firth approve <id> [--always]'); return 1 }
   const projectId = linkedProjectId(deps); if (!projectId) return 1
-  await apiFromDeps(deps).approve(projectId, id)
-  deps.print(`approved ${id}`)
+  const approval = await apiFromDeps(deps).approve(projectId, id, always)
+  if (always) deps.print(`approved ${id} — and set policy '${approval?.action ?? 'action'}: allow' (won't ask again)`)
+  else deps.print(`approved ${id}`)
   return 0
 }
 

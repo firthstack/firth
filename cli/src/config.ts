@@ -40,6 +40,11 @@ export function markSkillsInstalled(cwd = process.cwd()): void {
 export function writeProjectLink(projectId: string, cwd = process.cwd()): void {
   mkdirSync(join(cwd, '.firth'), { recursive: true })
   writeFileSync(lpath(cwd), JSON.stringify({ projectId }, null, 2))
+  // `.firth/` is per-machine session state (project link, current branch, sync-state,
+  // audit log) — never source. If it were tracked, a `git checkout`/`reset` would revert
+  // project.json and silently switch the agent's current branch (deploy reads its target
+  // branch from here), retargeting deploys at the committed branch (usually main).
+  ensureGitignore(cwd, ['.firth/'], 'Firth: local project link + session state (per-machine, regenerable, not source)')
 }
 
 export function setCurrentBranch(branch: { id: string; name: string } | null, cwd = process.cwd()): void {
@@ -60,14 +65,18 @@ export function clearProjectLink(cwd = process.cwd()): void {
 
 // Append any missing entries to the project's ./.gitignore (creating it if absent).
 // Idempotent: entries already present are left alone. Returns the entries it added.
-export function ensureGitignore(cwd: string, entries: string[]): string[] {
+export function ensureGitignore(
+  cwd: string,
+  entries: string[],
+  comment = 'Firth: agent skills installed by `firth` / `npx skills add` (regenerable, not source)',
+): string[] {
   const p = join(cwd, '.gitignore')
   const existing = existsSync(p) ? readFileSync(p, 'utf8') : ''
   const have = new Set(existing.split('\n').map((l) => l.trim()))
   const missing = entries.filter((e) => !have.has(e))
   if (missing.length === 0) return []
   const prefix = existing && !existing.endsWith('\n') ? '\n' : ''
-  const block = `${prefix}\n# Firth: agent skills installed by \`firth\` / \`npx skills add\` (regenerable, not source)\n${missing.join('\n')}\n`
+  const block = `${prefix}\n# ${comment}\n${missing.join('\n')}\n`
   writeFileSync(p, existing + block)
   return missing
 }

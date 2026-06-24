@@ -38,6 +38,25 @@ test('approve calls the api', async () => {
   expect(calls[0]).toEqual(['p1', 'a1'])
 })
 
+test('approve --always passes always=true and reports the policy it set', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)
+  const calls: any[] = []
+  const api = { approve: async (pid: string, id: string, always: boolean) => { calls.push([pid, id, always]); return { id, status: 'granted', action: 'secrets.read' } } }
+  const { d, out } = deps(dir, api)
+  expect(await approve(['a1', '--always'], d as any)).toBe(0)
+  expect(calls[0]).toEqual(['p1', 'a1', true])
+  expect(out.join('\n')).toMatch(/secrets\.read.*allow/)
+})
+
+test('approve (no flag) passes always=false', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)
+  const calls: any[] = []
+  const api = { approve: async (pid: string, id: string, always: boolean) => { calls.push([pid, id, always]); return { id, status: 'granted' } } }
+  const { d } = deps(dir, api)
+  expect(await approve(['a1'], d as any)).toBe(0)
+  expect(calls[0]).toEqual(['p1', 'a1', false])
+})
+
 test('deny calls the api', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'firth-')); writeProjectLink('p1', dir)
   const calls: any[] = []
