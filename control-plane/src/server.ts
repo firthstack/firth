@@ -214,8 +214,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (res.error) throw res.error
     return reply.send({ ok: true, kind: 'database', name: safe, env: envKey })
    } catch (e) {
-    const msg = e instanceof Error ? e.message : 'add resource failed'
-    console.error('add-resource failed:', msg)
+    // extract a real message from ANY thrown shape (Error, SDK error object, string)
+    const msg = e instanceof Error ? e.message
+      : (e && typeof e === 'object' && 'message' in e) ? String((e as { message: unknown }).message)
+      : (typeof e === 'string' ? e : JSON.stringify(e))
+    console.error('add-resource failed:', msg, e)
     return reply.code(502).send({ error: msg })
    }
   })
