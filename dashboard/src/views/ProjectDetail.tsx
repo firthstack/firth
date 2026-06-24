@@ -773,11 +773,14 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
         <span>{detail?.project.name ?? projectId}</span>
         <span className="firth-dim">{detail?.project.status ?? ''}</span>
       </Row>
-      <Row>
-        <span className="firth-dim">use from CLI / agent →</span>
-        <code style={{ fontFamily: 'inherit', color: 'var(--green)', overflow: 'hidden', textOverflow: 'ellipsis' }}>firth project link {projectId}</code>
-        <TButton onClick={() => copyText(`firth project link ${projectId}`)}>[copy]</TButton>
-      </Row>
+      <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', marginTop: 10 }}>
+        <div className="firth-dim" style={{ fontSize: 12, marginBottom: 7 }}>Use this project from your CLI or coding agent</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <code style={{ fontFamily: 'var(--mono)', color: 'var(--green)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, padding: '8px 10px', flex: 1, overflowX: 'auto', whiteSpace: 'pre' }}>$ firth project link {projectId}</code>
+          <TButton onClick={() => copyText(`firth project link ${projectId}`)} style={{ flexShrink: 0 }}>[copy]</TButton>
+        </div>
+        <div className="firth-dim" style={{ fontSize: 11, marginTop: 7, fontFamily: 'var(--mono)' }}>then: firth secrets · firth deploy . --port 8080 · firth manifest</div>
+      </div>
       {loading && <p className="firth-dim">loading...</p>}
       {error && <p className="firth-error">! {error}</p>}
       {detail && (
