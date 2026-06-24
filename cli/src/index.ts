@@ -12,6 +12,7 @@ import { deploy } from './commands/deploy.js'
 import { events } from './commands/events.js'
 import { observeSync } from './commands/observe.js'
 import { status } from './commands/status.js'
+import { manifest } from './commands/manifest.js'
 import { approvals, approve, deny, policy } from './commands/govern.js'
 import { defaultRunner, type Runner } from './fly.js'
 import { defaultBuildRunner, type BuildRunner } from './flyctl-build.js'
@@ -48,6 +49,7 @@ Commands:
   events                    Show the project's action↔side-effect timeline (--branch, --limit)
   observe sync              Upload local observe-hook findings (.firth/audit.jsonl) to the timeline
   status                    Show login, linked project, and current branch
+  manifest                  Show the env manifest (databases/storage/compute per env) [--json]
   project delete            Delete the linked project + all resources (--yes)
   branch switch <name>      Set the current branch (secrets/events default to it)
   branch delete <name>      Delete a branch + its Neon branch (--yes)
@@ -77,6 +79,7 @@ COMMANDS['branch switch'] = branchSwitch
 COMMANDS['branch delete'] = branchDelete
 COMMANDS['project delete'] = projectDelete
 COMMANDS['status'] = status
+COMMANDS['manifest'] = manifest
 COMMANDS['approvals'] = approvals
 COMMANDS['approve'] = approve
 COMMANDS['deny'] = deny

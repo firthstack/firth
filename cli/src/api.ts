@@ -65,6 +65,7 @@ export class FirthApi {
     return this.req('POST', `/projects/${projectId}/branches`, { name, from })
   }
   listBranches(projectId: string) { return this.req('GET', `/projects/${projectId}/branches`).then((r) => r.branches as any[]) }
+  getManifest(projectId: string) { return this.req('GET', `/projects/${projectId}/manifest`) }
   getSecrets(projectId: string, branch?: string): Promise<{ secrets?: Record<string, string>; status?: string; approvalId?: string; action?: string }> {
     const q = branch ? `?branch=${encodeURIComponent(branch)}` : ''
     return this.req('GET', `/projects/${projectId}/secrets${q}`)

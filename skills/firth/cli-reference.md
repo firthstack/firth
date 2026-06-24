@@ -10,11 +10,12 @@ Command catalog, deploy modes, Dockerfile templates, and govern/observe. For the
 | `firth project create <name>` | provision DB + storage + compute, link |
 | `firth project link <id>` · `firth project list` | link existing / list |
 | `firth project delete --yes` | tear down ALL resources + unlink (policy-gated by default) |
-| `firth branch create <name>` [`--from <parent>`] | isolated env: Neon branch + own compute (does NOT switch) |
+| `firth branch create <name>` [`--from <parent>`] | isolated **DB** env: own Neon branch; **compute is provisioned on first deploy** (does NOT switch) |
 | `firth branch switch <name>` · `firth branch list` | set current branch / list |
 | `firth branch delete <name> --yes` | tear down branch's Neon branch + Fly app (not the default) |
 | `firth secrets` [`--branch <id>`] | write current/given branch creds → `./.env` |
 | `firth deploy <dir> --port <n>` \| `--image <url>` [`--from <branch>`] | deploy (see Deploy modes) |
+| `firth manifest` [`--json`] | env manifest: each env's databases / storage / compute + how they wire (public-url) |
 | `firth events` [`--branch <id>`] [`--limit <n>`] · `firth observe sync` | timeline / upload agent-action logs |
 | `firth policy` [`set <action> <allow\|deny\|approve>`] | view/set govern policy |
 | `firth approvals` · `firth approve <id>` · `firth deny <id>` | manage gated actions |

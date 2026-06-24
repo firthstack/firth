@@ -3,10 +3,10 @@
 Read this when developing in a Firth project. For command syntax/flags and Dockerfile templates, see `cli-reference.md`.
 
 ## Branching is the default unit of work
-`firth branch create <name>` provisions a complete **isolated environment**: its own Neon DB branch (copy-on-write copy of the parent's data, own `DATABASE_URL`) + its own dedicated compute (own Fly app + URL). Only the storage bucket is shared. Branches run **fully in parallel** — nothing one does touches another.
+`firth branch create <name>` provisions a complete **isolated environment**: its own Neon DB branch (copy-on-write copy of the parent's data, own `DATABASE_URL`) + its own dedicated compute (own Fly app + URL) **provisioned on its first `firth deploy`** (a branch is DB-only until then). Only the storage bucket is shared. Branches run **fully in parallel** — nothing one does touches another.
 
 Per-branch loop:
-1. `firth branch create feat-x` — isolated DB + compute. **Does NOT auto-switch you.**
+1. `firth branch create feat-x` — isolated DB env (compute spins up on first deploy). **Does NOT auto-switch you.**
 2. `firth branch switch feat-x` — sets the current branch (per-directory, in `./.firth/project.json`).
 3. `firth secrets` — writes feat-x's `DATABASE_URL` etc. into `./.env`. (DB + compute are per-branch; storage is shared.)
 4. Build, then `firth deploy . --port <n>` — deploys to feat-x's own compute; **the command prints feat-x's URL**.
