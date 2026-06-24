@@ -98,6 +98,9 @@ export class Api {
   getManifest(projectId: string): Promise<{ project: string; environments: ManifestEnv[] }> {
     return this.req('GET', `/projects/${projectId}/manifest`)
   }
+  addResource(projectId: string, kind: 'compute' | 'database', env?: string, name?: string) {
+    return this.req('POST', `/projects/${projectId}/resources`, { kind, env, name })
+  }
   deployImage(projectId: string, image: string, port: number, branch?: string) {
     return this.req('POST', `/projects/${projectId}/deploy`, { image, port, branch })
   }
