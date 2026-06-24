@@ -25,5 +25,7 @@ export type DeployResult = { machineId: string; url: string }
 
 export interface ComputeAdapter extends ProviderAdapter {
   deploy(handle: ResourceHandle, opts: DeployOpts): Promise<DeployResult>
+  // Runtime state of the app's compute: 'running' | 'suspended' | 'stopped' | 'none' | 'unknown'.
+  appState(handle: ResourceHandle): Promise<string>
   mintDeployToken(handle: ResourceHandle, opts: { expirySeconds: number }): Promise<{ token: string; expirySeconds: number }>
 }

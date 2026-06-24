@@ -86,6 +86,13 @@ export class Api {
     return this.req('POST', `/projects/${projectId}/branches`, { name, from })
   }
 
+  getStatus(projectId: string): Promise<{ environments: Array<{ branchId: string; name: string; isDefault: boolean; state: string }> }> {
+    return this.req('GET', `/projects/${projectId}/status`)
+  }
+  deployImage(projectId: string, image: string, port: number, branch?: string) {
+    return this.req('POST', `/projects/${projectId}/deploy`, { image, port, branch })
+  }
+
   deleteBranch(projectId: string, branchId: string) {
     return this.req('DELETE', `/projects/${projectId}/branches/${branchId}`)
   }

@@ -135,7 +135,7 @@ function SecretRow({
 // status), connected to its parent by an edge. Top-down layered layout; nodes
 // link to their live URL. This is the "chart of the branching" view.
 // ---------------------------------------------------------------------------
-function BranchGraph({ branches, resources }: { branches: Branch[]; resources: Resource[] }) {
+function BranchGraph({ branches, resources, envState }: { branches: Branch[]; resources: Resource[]; envState?: Record<string, string> }) {
   const ids = new Set(branches.map((b) => b.id))
   const childrenOf = new Map<string, Branch[]>()
   for (const b of branches) {
@@ -198,7 +198,7 @@ function BranchGraph({ branches, resources }: { branches: Branch[]; resources: R
   const glyphFor = (status: string) => (STATUS_STYLE[status]?.glyph ?? '○')
 
   return (
-    <Panel title="branch graph">
+    <Panel title="environments">
       <div style={{ width: '100%', overflowX: 'auto' }}>
         <svg
           viewBox={`0 0 ${width} ${height}`}
@@ -236,6 +236,9 @@ function BranchGraph({ branches, resources }: { branches: Branch[]; resources: R
             const y = c.y - NODE_H / 2
             const col = colorFor(b.status)
             const url = flyUrlForBranch(b, resources)
+            const st = envState?.[b.id]
+            const stLabel = st === 'running' ? '● live' : st === 'suspended' ? '💤 asleep · $0' : st === 'stopped' ? '○ stopped' : ''
+            const stColor = st === 'running' ? 'var(--green)' : st === 'suspended' ? 'var(--amber)' : 'var(--fg-dim)'
             const node = (
               <g>
                 <rect
@@ -251,8 +254,9 @@ function BranchGraph({ branches, resources }: { branches: Branch[]; resources: R
                 <text x={x + 10} y={y + 19} fill={col} fontSize={13} fontFamily="var(--mono)">
                   {glyphFor(b.status)} {b.name}{b.is_default ? '  (default)' : ''}
                 </text>
-                <text x={x + 10} y={y + 36} fill="var(--fg-dim)" fontSize={11} fontFamily="var(--mono)">
-                  {url ? url.replace(/^https:\/\//, '') : 'no compute yet'}
+                <text x={x + 10} y={y + 36} fontSize={11} fontFamily="var(--mono)">
+                  {stLabel ? <tspan fill={stColor}>{stLabel}  </tspan> : null}
+                  <tspan fill="var(--fg-dim)">{url ? url.replace(/^https:\/\//, '') : 'no compute'}</tspan>
                 </text>
               </g>
             )
@@ -265,9 +269,9 @@ function BranchGraph({ branches, resources }: { branches: Branch[]; resources: R
         </svg>
       </div>
       <p className="firth-dim">
-        <span style={{ color: 'var(--green)' }}>● active</span>{'  '}
-        <span style={{ color: 'var(--amber)' }}>◐ creating</span>{'  '}
-        <span style={{ color: 'var(--red)' }}>✕ error</span>{'  ·  click a node to open its url'}
+        serverless: <span style={{ color: 'var(--green)' }}>● live</span>{'   '}
+        <span style={{ color: 'var(--amber)' }}>💤 asleep · $0</span>{'   '}
+        <span>○ stopped</span>{'  ·  idle environments scale to zero · click a node to open'}
       </p>
     </Panel>
   )
@@ -482,8 +486,40 @@ function ApprovalsPanel({ api, projectId }: { api: Api; projectId: string }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
+function DeployPanel({ api, projectId }: { api: Api; projectId: string }) {
+  const [image, setImage] = useState('')
+  const [port, setPort] = useState('8080')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  async function go() {
+    if (!image.trim() || busy) return
+    setBusy(true); setError(null); setResult(null)
+    try {
+      const out = await api.deployImage(projectId, image.trim(), Number(port) || 8080)
+      setResult((out as any)?.url ?? 'deployed')
+    } catch (e) { setError(e instanceof Error ? e.message : 'deploy failed') }
+    finally { setBusy(false) }
+  }
+  return (
+    <Panel title="deploy">
+      <CliHint command="firth deploy --image <url> --port <n>" note="# same deploy a human clicks or an agent runs via the firth skill" />
+      <Row>
+        <label htmlFor="dep-img">image</label>
+        <TInput id="dep-img" value={image} onChange={(e) => setImage(e.target.value)} placeholder="registry.fly.io/app:tag  or  docker.io/library/nginx" disabled={busy} />
+        <label htmlFor="dep-port">port</label>
+        <TInput id="dep-port" value={port} onChange={(e) => setPort(e.target.value)} disabled={busy} style={{ maxWidth: '8ch' }} />
+        <TButton onClick={go} disabled={busy}>{busy ? 'deploying…' : '[deploy]'}</TButton>
+      </Row>
+      {result && <p className="firth-dim">deployed → <a href={result} target="_blank" rel="noreferrer" style={{ color: 'var(--green)' }}>{result}</a></p>}
+      {error && <p className="firth-error">! {error}</p>}
+    </Panel>
+  )
+}
+
 export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId: string; onBack: () => void }) {
   const [detail, setDetail] = useState<Detail | null>(null)
+  const [envState, setEnvState] = useState<Record<string, string>>({})
   const [projectSecrets, setProjectSecrets] = useState<Record<string, string>>({})
   const [branchSecrets, setBranchSecrets] = useState<Record<string, string>>({})
   const [secretsGated, setSecretsGated] = useState(false)
@@ -502,6 +538,8 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
     try {
       const d = await api.getProject(projectId)
       setDetail(d)
+      // serverless runtime state per env (non-blocking; absent in tests)
+      api.getStatus?.(projectId)?.then((s) => setEnvState(Object.fromEntries((s.environments ?? []).map((e) => [e.branchId, e.state])))).catch(() => {})
 
       // Fetch secrets; allow partial failure so resources still render
       try {
@@ -568,7 +606,8 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
                 : <><span aria-hidden="true">🔒</span>{' secrets require approval — approve the pending request in the Approvals panel below (or run `firth approve <id>`), then reload.'}</>}
             </p>
           )}
-          <BranchGraph branches={detail.branches} resources={detail.resources} />
+          <BranchGraph branches={detail.branches} resources={detail.resources} envState={envState} />
+          <DeployPanel api={api} projectId={projectId} />
           <BranchesPanel
             branches={detail.branches}
             resources={detail.resources}
