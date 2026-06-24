@@ -5,7 +5,7 @@ import { resolveUid, UnauthorizedError, NotFoundError, ConflictError, ForbiddenE
 import type { DataClient } from './db/types.js'
 import { ProjectsRepo, SecretsRepo, BranchesRepo, ResourcesRepo, EventsRepo } from './db/repos.js'
 import { GovernService, isGatedAction, type GatedAction } from './services/govern.js'
-import { decryptSecret } from './crypto/secrets.js'
+import { decryptSecret, encryptSecret } from './crypto/secrets.js'
 import { ProvisioningService } from './services/provisioning.js'
 import { BranchService } from './services/branches.js'
 import { DeployService } from './services/deploy.js'
@@ -148,20 +148,23 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const storage = s3
       ? [{ name: 'assets', engine: 'tigris-s3', bucket: String((s3.provider_ref as any).bucket ?? (s3.provider_ref as any).bucketName ?? ''), shared: true, env: ['BUCKET_NAME', 'AWS_ENDPOINT_URL_S3', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION'] }]
       : []
-    const flyByBranch = new Map<string, any>()
-    for (const r of resources) if (r.kind === 'fly') flyByBranch.set((r.branch_id as string) ?? '__project__', r)
+    const flyByBranch = new Map<string, any[]>()
+    for (const r of resources) if (r.kind === 'fly') { const k = (r.branch_id as string) ?? '__project__'; flyByBranch.set(k, [...(flyByBranch.get(k) ?? []), r]) }
+    const neonExtra = new Map<string, any[]>()
+    for (const r of resources) if (r.kind === 'neon' && r.branch_id) neonExtra.set(r.branch_id as string, [...(neonExtra.get(r.branch_id as string) ?? []), r])
 
     const environments = await Promise.all(branches.map(async (b) => {
-      const flyR = flyByBranch.get(b.id) ?? (b.is_default ? flyByBranch.get('__project__') : undefined)
-      const flyApp = flyR ? String((flyR.provider_ref as any).flyApp ?? '') : ''
-      let state = 'none'
-      if (flyR && fly?.appState) { try { state = await fly.appState({ kind: 'fly', providerRef: flyR.provider_ref }) } catch { state = 'unknown' } }
-      const databases = b.neon_branch_ref
-        ? [{ name: 'primary', engine: 'neon-postgres', ref: b.neon_branch_ref, env: 'DATABASE_URL' }]
-        : []
-      const compute = flyApp
-        ? [{ name: 'app', engine: 'fly-machine', url: `https://${flyApp}.fly.dev`, state, uses: [...databases.map((d) => d.name), ...storage.map((x) => x.name)] }]
-        : []
+      const flyList: any[] = flyByBranch.get(b.id) ?? (b.is_default ? (flyByBranch.get('__project__') ?? []) : [])
+      const databases = [
+        ...(b.neon_branch_ref ? [{ name: 'primary', engine: 'neon-postgres', ref: b.neon_branch_ref, env: 'DATABASE_URL' }] : []),
+        ...(neonExtra.get(b.id) ?? []).map((r) => ({ name: String((r.provider_ref as any).name ?? 'db'), engine: 'neon-postgres', ref: String((r.provider_ref as any).neonBranchRef ?? ''), env: `DATABASE_URL_${String((r.provider_ref as any).name ?? 'db').toUpperCase().replace(/[^A-Z0-9]/g, '_')}` })),
+      ]
+      const compute = await Promise.all(flyList.map(async (r, i) => {
+        const flyApp = String((r.provider_ref as any).flyApp ?? '')
+        let state = 'none'
+        if (fly?.appState) { try { state = await fly.appState({ kind: 'fly', providerRef: r.provider_ref }) } catch { state = 'unknown' } }
+        return { name: flyList.length > 1 ? `machine-${i + 1}` : 'app', engine: 'fly-machine', url: `https://${flyApp}.fly.dev`, state, uses: [...databases.map((d) => d.name), ...storage.map((x) => x.name)] }
+      }))
       return {
         name: b.name,
         default: b.is_default,
@@ -171,6 +174,44 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       }
     }))
     return reply.send({ project: project.name, environments })
+  })
+
+  // Add a single resource (compute machine or database) to an environment — the
+  // composable "+ Add machine / + Add database" action. Provisions independently.
+  app.post('/projects/:id/resources', async (req, reply) => {
+    const { uid, token, db } = await auth(req)
+    const projectId = (req.params as any).id
+    const { kind, env: envName, name } = (req.body as any) ?? {}
+    if (kind !== 'compute' && kind !== 'database') return reply.code(400).send({ error: 'kind must be compute | database' })
+    const branches = await new BranchesRepo(db).listByProject(uid, projectId)
+    const target = envName ? branches.find((b) => b.name === envName || b.id === envName) : (branches.find((b) => b.is_default) ?? branches[0])
+    if (!target) return reply.code(404).send({ error: 'environment not found' })
+    const safe = (typeof name === 'string' && /^[a-z0-9-]{1,24}$/i.test(name)) ? name.toLowerCase() : kind
+    const adapters = deps.adaptersForToken ? deps.adaptersForToken(token) : []
+    if (kind === 'compute') {
+      const fly = adapters.find((a) => a.kind === 'fly')
+      if (!fly) return reply.code(400).send({ error: 'no fly adapter configured' })
+      const handle = await fly.provision(`${target.name}-${safe}`)
+      const res = await db.from('resources').insert({ project_id: projectId, owner: uid, kind: 'fly', branch_id: target.id, provider_ref: handle.providerRef, status: 'active' }).select()
+      if (res.error) throw res.error
+      return reply.send({ ok: true, kind: 'compute', name: safe, url: `https://${(handle.providerRef as { flyApp?: string }).flyApp}.fly.dev` })
+    }
+    const neon = adapters.find((a) => a.kind === 'neon')
+    if (!neon) return reply.code(400).send({ error: 'no neon adapter configured' })
+    const neonRes = await new ResourcesRepo(db).findByKind(uid, projectId, 'neon')
+    if (!neonRes) return reply.code(400).send({ error: 'project has no neon resource' })
+    const neonHandle: ResourceHandle = { kind: 'neon', providerRef: neonRes.provider_ref }
+    const ref = await neon.createBranch(neonHandle, `${target.name}-${safe}`, target.neon_branch_ref ?? undefined)
+    if (!ref) return reply.code(502).send({ error: 'neon branch create returned no id' })
+    const creds = await neon.mintCredentials(neonHandle, ref)
+    const envKey = `DATABASE_URL_${safe.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`
+    if ((creds as Record<string, string>).DATABASE_URL) {
+      const e = encryptSecret((creds as Record<string, string>).DATABASE_URL, deps.cfg.keks, deps.cfg.currentKek)
+      await db.from('secrets').insert({ project_id: projectId, owner: uid, branch_id: target.id, name: envKey, ciphertext: e.ciphertext, nonce: e.nonce, kek_version: e.kekVersion }).select()
+    }
+    const res = await db.from('resources').insert({ project_id: projectId, owner: uid, kind: 'neon', branch_id: target.id, provider_ref: { neonBranchRef: ref, name: safe }, status: 'active' }).select()
+    if (res.error) throw res.error
+    return reply.send({ ok: true, kind: 'database', name: safe, env: envKey })
   })
 
   app.delete('/projects/:id', async (req, reply) => {

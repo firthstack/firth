@@ -550,49 +550,114 @@ function DeployPanel({ api, projectId, branches }: { api: Api; projectId: string
   )
 }
 
-function ManifestPanel({ api, projectId }: { api: Api; projectId: string }) {
-  const [envs, setEnvs] = useState<ManifestEnv[] | null>(null)
-  useEffect(() => {
-    let on = true
-    api.getManifest?.(projectId)?.then((m) => { if (on) setEnvs(m.environments ?? []) }).catch(() => { if (on) setEnvs([]) })
-    return () => { on = false }
-  }, [api, projectId])
-  if (!envs || envs.length === 0) return null
-  const stColor = (st: string) => st === 'running' ? 'var(--green)' : (st === 'suspended' || st === 'stopped') ? 'var(--amber)' : 'var(--fg-dim)'
-  const stLabel = (st: string) => st === 'running' ? '● live' : st === 'suspended' ? '💤 asleep' : st === 'stopped' ? '○ stopped' : 'none'
-  const kind = (k: string) => <span className="firth-dim" style={{ minWidth: '9ch', flexShrink: 0 }}>{k}</span>
+
+// ---------------------------------------------------------------------------
+// EnvBoard — the Railway-style card view. Each environment is a card holding
+// resource cards (database / storage / machine) with a "+ Add" menu and a Clone
+// action. Reads the manifest; "+ Add machine/database" provisions real resources.
+// ---------------------------------------------------------------------------
+const CARD: React.CSSProperties = { background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 14, marginTop: 14 }
+const RESGRID: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 10, marginTop: 12 }
+const RESCARD: React.CSSProperties = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 9, padding: '10px 12px', minHeight: 86 }
+const ICO: Record<string, string> = { db: '🗄', storage: '🪣', machine: '▲', add: '＋' }
+
+function ResCard({ icon, title, sub, state, url, action }: { icon: string; title: string; sub: string; state?: string; url?: string | null; action?: React.ReactNode }) {
+  const stColor = state === 'running' ? 'var(--green)' : (state === 'suspended' || state === 'stopped') ? 'var(--amber)' : state === 'none' ? 'var(--fg-dim)' : 'var(--fg-dim)'
+  const stLabel = state === 'running' ? '● live' : state === 'suspended' ? '💤 asleep' : state === 'stopped' ? '○ stopped' : state === 'none' ? '○ no machine' : ''
   return (
-    <Panel title="manifest">
+    <div style={RESCARD}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 15 }}>{icon}</span>
+        <strong style={{ fontFamily: 'var(--mono)' }}>{title}</strong>
+        {state && <span style={{ marginLeft: 'auto', color: stColor, fontSize: 11, fontFamily: 'var(--mono)' }}>{stLabel}</span>}
+      </div>
+      <div className="firth-dim" style={{ fontSize: 12, fontFamily: 'var(--mono)', marginTop: 6 }}>{sub}</div>
+      {url && <div style={{ marginTop: 6, overflow: 'hidden' }}><a href={url} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', fontSize: 12, fontFamily: 'var(--mono)', whiteSpace: 'nowrap' }}>{url.replace(/^https:\/\//, '')}</a></div>}
+      {action && <div style={{ marginTop: 8 }}>{action}</div>}
+    </div>
+  )
+}
+
+function EnvBoard({ api, projectId, onChanged }: { api: Api; projectId: string; onChanged: () => void }) {
+  const [envs, setEnvs] = useState<ManifestEnv[] | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [cloning, setCloning] = useState<string | null>(null)
+  const [cloneName, setCloneName] = useState('')
+  const [adding, setAdding] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(() => {
+    api.getManifest?.(projectId)?.then((m) => setEnvs(m.environments ?? [])).catch(() => setEnvs([]))
+  }, [api, projectId])
+  useEffect(() => { load() }, [load])
+
+  async function doClone(envName: string) {
+    if (!cloneName.trim() || busy) return
+    setBusy('clone'); setError(null)
+    try { await api.createBranch(projectId, cloneName.trim(), envName); setCloning(null); setCloneName(''); load(); onChanged() }
+    catch (e) { setError(e instanceof Error ? e.message : 'clone failed') }
+    finally { setBusy(null) }
+  }
+  async function doAdd(envName: string, kind: 'compute' | 'database') {
+    setBusy(`${envName}-${kind}`); setError(null); setAdding(null)
+    try { await api.addResource?.(projectId, kind, envName); load(); onChanged() }
+    catch (e) { setError(e instanceof Error ? e.message : `add ${kind} failed`) }
+    finally { setBusy(null) }
+  }
+
+  if (!envs) return null
+  return (
+    <div>
+      <Row><h3 style={{ margin: '4px 0', fontSize: 15 }}>Environments</h3><span className="firth-dim">{envs.length}</span></Row>
+      {error && <p className="firth-error">! {error}</p>}
       {envs.map((e) => (
-        <div key={e.name} style={{ marginTop: 8, paddingTop: 8, borderTop: '1px dashed var(--border)' }}>
+        <div key={e.name} style={CARD}>
           <Row>
-            <strong>{e.name}</strong>
+            <span style={{ color: 'var(--green)' }}>●</span>
+            <strong style={{ fontFamily: 'var(--mono)', fontSize: 15 }}>{e.name}</strong>
             {e.default && <span className="firth-dim">default</span>}
             {e.cloneOf && <span className="firth-dim">← clone of {e.cloneOf}</span>}
+            <span style={{ flex: 1 }} />
+            {cloning === e.name ? (
+              <>
+                <TInput value={cloneName} onChange={(ev) => setCloneName(ev.target.value)} placeholder="new env name" disabled={!!busy} />
+                <TButton onClick={() => doClone(e.name)} disabled={!!busy}>{busy === 'clone' ? 'cloning…' : '[clone]'}</TButton>
+                <TButton onClick={() => { setCloning(null); setCloneName('') }} disabled={!!busy}>[x]</TButton>
+              </>
+            ) : (
+              <TButton onClick={() => { setCloning(e.name); setCloneName('') }}>[⎘ Clone env]</TButton>
+            )}
           </Row>
-          {e.databases.map((d) => (
-            <Row key={`db-${d.name}`}>{kind('db')}<code style={{ fontFamily: 'inherit' }}>{d.name}</code><span className="firth-dim">{d.engine} → {d.env}</span></Row>
-          ))}
-          {e.storage.map((st) => (
-            <Row key={`st-${st.name}`}>{kind('storage')}<code style={{ fontFamily: 'inherit' }}>{st.name}</code><span className="firth-dim">{st.engine}{st.shared ? ' (shared)' : ''}</span></Row>
-          ))}
-          {e.compute.length ? e.compute.map((c) => (
-            <Row key={`cp-${c.name}`}>
-              {kind('compute')}
-              <code style={{ fontFamily: 'inherit', flexShrink: 0 }}>{c.name}</code>
-              <span style={{ color: stColor(c.state), flexShrink: 0 }}>{stLabel(c.state)}</span>
-              <span style={{ flex: 1, overflow: 'hidden' }}>
-                <a href={c.url} target="_blank" rel="noreferrer" style={{ color: 'var(--green)', whiteSpace: 'pre', fontFamily: 'inherit' }}>{c.url.replace(/^https:\/\//, '')}</a>
-              </span>
-              {c.uses?.length ? <span className="firth-dim" style={{ flexShrink: 0 }}>uses({c.uses.join(', ')})</span> : null}
-            </Row>
-          )) : (
-            <Row>{kind('compute')}<span className="firth-dim">(none — deploy to spin one up)</span></Row>
-          )}
+
+          <div style={RESGRID}>
+            {e.databases.map((d) => (
+              <ResCard key={`db-${d.name}`} icon={ICO.db} title={d.name} sub={`${d.engine} → ${d.env}`} />
+            ))}
+            {e.storage.map((s) => (
+              <ResCard key={`st-${s.name}`} icon={ICO.storage} title={s.name} sub={`${s.engine}${s.shared ? ' · shared' : ''}`} />
+            ))}
+            {e.compute.length ? e.compute.map((c) => (
+              <ResCard key={`cp-${c.name}`} icon={ICO.machine} title={c.name} sub="fly-machine" state={c.state} url={c.url} />
+            )) : (
+              <ResCard icon={ICO.machine} title="machine" sub="none yet — add one" state="none" />
+            )}
+
+            {/* + Add card */}
+            <div style={{ ...RESCARD, borderStyle: 'dashed', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 6 }}>
+              {adding === e.name ? (
+                <>
+                  <TButton onClick={() => doAdd(e.name, 'compute')} disabled={!!busy}>{busy === `${e.name}-compute` ? 'adding…' : '＋ machine'}</TButton>
+                  <TButton onClick={() => doAdd(e.name, 'database')} disabled={!!busy}>{busy === `${e.name}-database` ? 'adding…' : '＋ database'}</TButton>
+                  <TButton onClick={() => setAdding(null)} disabled={!!busy}>[cancel]</TButton>
+                </>
+              ) : (
+                <TButton onClick={() => setAdding(e.name)}>＋ Add resource ▾</TButton>
+              )}
+            </div>
+          </div>
         </div>
       ))}
-      <p className="firth-dim">wiring: public-url — resources reference each other by env var / url</p>
-    </Panel>
+    </div>
   )
 }
 
@@ -684,8 +749,8 @@ export function ProjectDetail({ api, projectId, onBack }: { api: Api; projectId:
                 : <><span aria-hidden="true">🔒</span>{' secrets require approval — approve the pending request in the Approvals panel below (or run `firth approve <id>`), then reload.'}</>}
             </p>
           )}
+          <EnvBoard api={api} projectId={projectId} onChanged={refresh} />
           <BranchGraph branches={detail.branches} resources={detail.resources} envState={envState} />
-          <ManifestPanel api={api} projectId={projectId} />
           <DeployPanel api={api} projectId={projectId} branches={detail.branches} />
           <BranchesPanel
             branches={detail.branches}
