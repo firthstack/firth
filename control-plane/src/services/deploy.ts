@@ -8,6 +8,21 @@ import { NotFoundError } from '../auth.js'
 export class DeployService {
   constructor(private db: DataClient, private cfg: FirthConfig, private adapters: ProviderAdapter[]) {}
 
+  // Find the branch's compute, or provision it on demand. Compute is created on the
+  // FIRST deploy (not at branch create), so envs start DB-only and only spin up a
+  // Fly microVM when something is actually deployed to them.
+  private async ensureCompute(owner: string, projectId: string, branchId: string, branchName: string, fly: ComputeAdapter): Promise<ResourceHandle> {
+    const existing = await new ResourcesRepo(this.db).findByKindForBranch(owner, projectId, branchId, 'fly')
+    if (existing) return { kind: 'fly', providerRef: existing.provider_ref }
+    const handle = await fly.provision(branchName)
+    const res = await this.db.from('resources').insert({
+      project_id: projectId, owner, kind: 'fly', branch_id: branchId,
+      provider_ref: handle.providerRef, status: 'active',
+    }).select()
+    if (res.error) throw res.error
+    return handle
+  }
+
   async deploy(owner: string, projectId: string, opts: { image: string; from?: string; port?: number }): Promise<DeployResult> {
     const fly = this.adapters.find((a) => a.kind === 'fly') as ComputeAdapter | undefined
     if (!fly?.deploy) throw new Error('fly adapter not configured')
@@ -19,8 +34,7 @@ export class DeployService {
       : (all.find((b) => b.is_default) ?? all[0])
     if (!target) throw new Error(`branch "${opts.from ?? '(default)'}" not found`)
 
-    const resource = await new ResourcesRepo(this.db).findByKindForBranch(owner, projectId, target.id, 'fly')
-    if (!resource) throw new Error('branch has no fly resource')
+    const handle = await this.ensureCompute(owner, projectId, target.id, target.name, fly)
 
     const secrets = new SecretsRepo(this.db)
     const rows = [
@@ -32,7 +46,6 @@ export class DeployService {
       env[r.name] = decryptSecret({ ciphertext: r.ciphertext, nonce: r.nonce, kekVersion: r.kek_version }, this.cfg.keks)
     }
 
-    const handle: ResourceHandle = { kind: 'fly', providerRef: resource.provider_ref }
     return fly.deploy(handle, { image: opts.image, env, port: opts.port, persistent: target.is_default })
   }
 
@@ -46,10 +59,8 @@ export class DeployService {
       : (all.find((b) => b.is_default) ?? all[0])
     if (!target) throw new NotFoundError(`branch "${opts.from ?? '(default)'}" not found`)
 
-    const resource = await new ResourcesRepo(this.db).findByKindForBranch(owner, projectId, target.id, 'fly')
-    if (!resource) throw new NotFoundError('branch has no fly resource')
-
-    const { token, expirySeconds } = await fly.mintDeployToken({ kind: 'fly', providerRef: resource.provider_ref }, { expirySeconds: 1200 })
-    return { token, expirySeconds, flyApp: String(resource.provider_ref.flyApp) }
+    const handle = await this.ensureCompute(owner, projectId, target.id, target.name, fly)
+    const { token, expirySeconds } = await fly.mintDeployToken(handle, { expirySeconds: 1200 })
+    return { token, expirySeconds, flyApp: String((handle.providerRef as { flyApp?: string }).flyApp) }
   }
 }

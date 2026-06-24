@@ -52,10 +52,12 @@ describe('DeployService.deploy', () => {
     expect(cap.opts.env).toEqual({ AWS_ACCESS_KEY_ID: 'tid_x', DATABASE_URL: 'postgresql://conn' }) // both scopes, decrypted
   })
 
-  test('throws when the project has no fly resource', async () => {
+  test('provisions compute on demand when the branch has none, then deploys', async () => {
+    // DB-only branch (no fly resource): deploy should lazily provision compute, not throw.
+    const cap: any = {}
     const db = fakeDb({ branches: [{ id: 'b', owner: 'o', project_id: 'p', name: 'main', is_default: true, neon_branch_ref: 'x', status: 'active' }] })
-    await expect(new DeployService(db as any, cfg, [flyAdapter({})]).deploy('o', 'p', { image: 'x' }))
-      .rejects.toThrow(/fly resource/i)
+    const out = await new DeployService(db as any, cfg, [flyAdapter(cap)]).deploy('o', 'p', { image: 'x' })
+    expect(out.machineId).toBe('m-1')  // deploy succeeded after on-demand provision
   })
 
   test('throws when no fly adapter is configured', async () => {
@@ -81,12 +83,13 @@ describe('DeployService.deploy', () => {
     expect(out.url).toBe('https://app.fly.dev')
   })
 
-  test('throws a clear error when the target branch has no fly resource', async () => {
+  test('provisions compute on demand for a target branch with no resource', async () => {
+    const cap: any = {}
     const db = fakeDb({
       branches: [{ id: 'b-feat', owner: 'o', project_id: 'p', name: 'feature', is_default: false, neon_branch_ref: 'br-feat', status: 'active' }],
       resources: [],
     })
-    await expect(new DeployService(db as any, cfg, [flyAdapter({})]).deploy('o', 'p', { image: 'img', from: 'feature' }))
-      .rejects.toThrow('branch has no fly resource')
+    const out = await new DeployService(db as any, cfg, [flyAdapter(cap)]).deploy('o', 'p', { image: 'img', from: 'feature' })
+    expect(out.machineId).toBe('m-1')  // lazily provisioned, then deployed
   })
 })
