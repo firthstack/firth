@@ -92,17 +92,6 @@ describe('ProjectDetail', () => {
 
   // ---- cli hints -----------------------------------------------------------
 
-  it('shows the firth project link cli hint with the project id', async () => {
-    render(<ProjectDetail api={fakeApi()} projectId="p1" onBack={vi.fn()} />)
-    expect(await screen.findByText('firth project link p1')).toBeInTheDocument()
-  })
-
-  it('shows the firth branch create cli hint', async () => {
-    render(<ProjectDetail api={fakeApi()} projectId="p1" onBack={vi.fn()} />)
-    await screen.findByText('main')
-    expect(screen.getByText('firth branch create <name>')).toBeInTheDocument()
-  })
-
   // ---- branch actions ------------------------------------------------------
 
   it('deleting a non-default branch calls deleteBranch', async () => {
@@ -135,11 +124,10 @@ describe('ProjectDetail', () => {
     const getProject = vi.fn().mockResolvedValue(detail)
     render(<ProjectDetail api={fakeApi({ createBranch, getProject })} projectId="p1" onBack={vi.fn()} />)
     await screen.findByText('main')
-    await userEvent.click(screen.getByRole('button', { name: /create branch/i }))
-    await userEvent.type(screen.getByLabelText(/^name$/i), 'feature')
-    await userEvent.clear(screen.getByLabelText(/^from$/i))
-    await userEvent.type(screen.getByLabelText(/^from$/i), 'main')
-    await userEvent.click(screen.getByRole('button', { name: /^\[ok\]$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /clone environment/i }))
+    await userEvent.type(screen.getByLabelText(/new env/i), 'feature')
+    await userEvent.selectOptions(screen.getByLabelText(/clone of/i), 'main')
+    await userEvent.click(screen.getByRole('button', { name: /^\[clone\]$/i }))
     await waitFor(() => expect(createBranch).toHaveBeenCalledWith('p1', 'feature', 'main'))
   })
 
@@ -149,11 +137,11 @@ describe('ProjectDetail', () => {
     const createBranch = vi.fn(() => new Promise<unknown>((res) => { finish = () => res({}) }))
     render(<ProjectDetail api={fakeApi({ createBranch, getProject })} projectId="p1" onBack={vi.fn()} />)
     await screen.findByText('main')
-    await userEvent.click(screen.getByRole('button', { name: /create branch/i }))
-    await userEvent.type(screen.getByLabelText(/^name$/i), 'feature')
-    await userEvent.click(screen.getByRole('button', { name: /^\[ok\]$/i }))
-    // in-flight: the button shows "creating…" and is disabled
-    const btn = screen.getByRole('button', { name: /creating/i })
+    await userEvent.click(screen.getByRole('button', { name: /clone environment/i }))
+    await userEvent.type(screen.getByLabelText(/new env/i), 'feature')
+    await userEvent.click(screen.getByRole('button', { name: /^\[clone\]$/i }))
+    // in-flight: the button shows "cloning…" and is disabled
+    const btn = screen.getByRole('button', { name: /cloning/i })
     expect(btn).toBeDisabled()
     expect(createBranch).toHaveBeenCalledTimes(1)
     await userEvent.click(btn) // second click while submitting must be a no-op
@@ -187,15 +175,14 @@ describe('ProjectDetail', () => {
     expect(screen.getAllByText('feature').length).toBeGreaterThan(0)
   })
 
-  it('submitting with empty from defaults parent to main', async () => {
+  it('clone defaults to the main env when none picked', async () => {
     const createBranch = vi.fn(async () => ({}))
     const getProject = vi.fn().mockResolvedValue(detail)
     render(<ProjectDetail api={fakeApi({ createBranch, getProject })} projectId="p1" onBack={vi.fn()} />)
     await screen.findByText('main')
-    await userEvent.click(screen.getByRole('button', { name: /create branch/i }))
-    await userEvent.type(screen.getByLabelText(/^name$/i), 'empty-from-test')
-    await userEvent.clear(screen.getByLabelText(/^from$/i))
-    await userEvent.click(screen.getByRole('button', { name: /^\[ok\]$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /clone environment/i }))
+    await userEvent.type(screen.getByLabelText(/new env/i), 'empty-from-test')
+    await userEvent.click(screen.getByRole('button', { name: /^\[clone\]$/i }))
     await waitFor(() => expect(createBranch).toHaveBeenCalledWith('p1', 'empty-from-test', 'main'))
   })
 
