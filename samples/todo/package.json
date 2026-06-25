@@ -8,6 +8,7 @@
     "test": "node --env-file=../.env --test"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1075.0",
     "express": "^4.21.2",
     "pg": "^8.13.1"
   }
