@@ -99,13 +99,13 @@ test('updateTodo returns null for another user\'s todo and leaves it unchanged',
 
 test('deleteTodo returns false for another user\'s todo and leaves it intact', async () => {
   const t = await createTodo(client, userB.id, 'b-secret')
-  assert.equal(await deleteTodo(client, userA.id, t.id), false)
+  assert.equal((await deleteTodo(client, userA.id, t.id)).deleted, false)
   assert.equal((await listTodos(client, userB.id)).length, 1)
 })
 
 test('updateTodo / deleteTodo return null/false for a missing id', async () => {
   assert.equal(await updateTodo(client, userA.id, MISSING_ID, { completed: true }), null)
-  assert.equal(await deleteTodo(client, userA.id, MISSING_ID), false)
+  assert.equal((await deleteTodo(client, userA.id, MISSING_ID)).deleted, false)
 })
 
 test('clearCompleted clears only the caller\'s completed todos', async () => {
@@ -113,6 +113,43 @@ test('clearCompleted clears only the caller\'s completed todos', async () => {
   await updateTodo(client, userA.id, a1.id, { completed: true })
   const b1 = await createTodo(client, userB.id, 'b-done')
   await updateTodo(client, userB.id, b1.id, { completed: true })
-  assert.equal(await clearCompleted(client, userA.id), 1)
+  assert.equal((await clearCompleted(client, userA.id)).count, 1)
   assert.equal((await listTodos(client, userB.id)).length, 1) // B untouched
+})
+
+// --- todos: images ---
+test('createTodo with an image key stores and returns image_key', async () => {
+  const t = await createTodo(client, userA.id, 'pic', 'todos/y.jpg')
+  assert.equal(t.image_key, 'todos/y.jpg')
+})
+
+test('createTodo without an image key leaves image_key null', async () => {
+  const t = await createTodo(client, userA.id, 'nopic')
+  assert.equal(t.image_key, null)
+})
+
+test('listTodos includes image_key', async () => {
+  await createTodo(client, userA.id, 'pic', 'todos/y.jpg')
+  const [row] = await listTodos(client, userA.id)
+  assert.equal(row.image_key, 'todos/y.jpg')
+})
+
+test('deleteTodo returns { deleted, imageKey } for an owned row', async () => {
+  const t = await createTodo(client, userA.id, 'pic', 'todos/y.jpg')
+  assert.deepEqual(await deleteTodo(client, userA.id, t.id), { deleted: true, imageKey: 'todos/y.jpg' })
+})
+
+test('deleteTodo returns deleted:true, imageKey:null for an owned row with no image', async () => {
+  const t = await createTodo(client, userA.id, 'nopic')
+  assert.deepEqual(await deleteTodo(client, userA.id, t.id), { deleted: true, imageKey: null })
+})
+
+test('clearCompleted returns { count, imageKeys } with only non-null keys', async () => {
+  const a1 = await createTodo(client, userA.id, 'withpic', 'todos/k1.jpg')
+  const a2 = await createTodo(client, userA.id, 'nopic')
+  await updateTodo(client, userA.id, a1.id, { completed: true })
+  await updateTodo(client, userA.id, a2.id, { completed: true })
+  const res = await clearCompleted(client, userA.id)
+  assert.equal(res.count, 2)
+  assert.deepEqual(res.imageKeys, ['todos/k1.jpg'])
 })

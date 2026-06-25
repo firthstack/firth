@@ -1,7 +1,7 @@
 import pg from 'pg'
 import { hashPassword, verifyPassword, newSessionToken, hashToken } from './auth.js'
 
-const COLS = 'id, title, completed, created_at, updated_at'
+const COLS = 'id, title, completed, image_key, created_at, updated_at'
 const SESSION_TTL_DAYS = 30
 
 export class ValidationError extends Error {}
@@ -21,7 +21,7 @@ export function makePool(connectionString = process.env.DATABASE_URL) {
   })
 }
 
-function cleanTitle(title) {
+export function cleanTitle(title) {
   if (typeof title !== 'string') throw new ValidationError('title must be a string')
   const t = title.trim()
   if (t.length < 1) throw new ValidationError('title must not be empty')
@@ -104,11 +104,11 @@ export async function listTodos(db, userId) {
   return rows
 }
 
-export async function createTodo(db, userId, title) {
+export async function createTodo(db, userId, title, imageKey) {
   const t = cleanTitle(title)
   const { rows } = await db.query(
-    `insert into todos (user_id, title) values ($1, $2) returning ${COLS}`,
-    [userId, t],
+    `insert into todos (user_id, title, image_key) values ($1, $2, $3) returning ${COLS}`,
+    [userId, t, imageKey ?? null],
   )
   return rows[0]
 }
@@ -133,19 +133,20 @@ export async function updateTodo(db, userId, id, fields) {
 }
 
 export async function deleteTodo(db, userId, id) {
-  const { rowCount } = await db.query(
-    'delete from todos where id = $1 and user_id = $2',
+  const { rows } = await db.query(
+    'delete from todos where id = $1 and user_id = $2 returning image_key',
     [id, userId],
   )
-  return rowCount > 0
+  if (rows.length === 0) return { deleted: false, imageKey: null }
+  return { deleted: true, imageKey: rows[0].image_key }
 }
 
 export async function clearCompleted(db, userId) {
-  const { rowCount } = await db.query(
-    'delete from todos where user_id = $1 and completed = true',
+  const { rows } = await db.query(
+    'delete from todos where user_id = $1 and completed = true returning image_key',
     [userId],
   )
-  return rowCount
+  return { count: rows.length, imageKeys: rows.map((r) => r.image_key).filter(Boolean) }
 }
 
 export { verifyPassword }
