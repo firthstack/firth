@@ -82,7 +82,7 @@ Firth ships an agent skill under [`skills/firth/`](./skills/firth/) describing t
 | [`cli/`](./cli/) | The `firth` command-line interface. |
 | [`dashboard/`](./dashboard/) | The web dashboard (terminal-style UI). |
 | [`skills/firth/`](./skills/firth/) | The agent skill. |
-| [`observe/`](./observe/) | The agent-action observability hook. |
+| [`cli/src/observe/`](./cli/src/observe/) | The Node credential-audit hook (auto-installed at `firth project link`; `firth observe install`/`report`). |
 
 ## Architecture
 
