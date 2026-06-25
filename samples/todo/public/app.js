@@ -5,6 +5,7 @@ const authForm = $('auth-form'), authEmail = $('auth-email'), authPassword = $('
 const authSubmit = $('auth-submit'), authToggle = $('auth-toggle'), authModeLabel = $('auth-mode-label')
 const whoEl = $('who'), logoutBtn = $('logout')
 const listEl = $('list'), countEl = $('count'), form = $('new-form'), input = $('new-input')
+const fileInput = $('new-image')
 const clearBtn = $('clear-completed'), filterBtns = [...document.querySelectorAll('.filters button')]
 
 let todos = []
@@ -17,9 +18,14 @@ const clearError = () => { errorEl.hidden = true }
 
 async function api(method, pathName, body) {
   const headers = {}
-  if (body) headers['Content-Type'] = 'application/json'
+  const isForm = body instanceof FormData
+  if (body && !isForm) headers['Content-Type'] = 'application/json' // browser sets multipart boundary itself
   if (token) headers.Authorization = `Bearer ${token}`
-  const res = await fetch(pathName, { method, headers, body: body ? JSON.stringify(body) : undefined })
+  const res = await fetch(pathName, {
+    method,
+    headers,
+    body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
+  })
   if (res.status === 401) {
     token = null
     localStorage.removeItem('todo_token')
@@ -107,7 +113,21 @@ function renderItem(t) {
   del.setAttribute('aria-label', 'Delete')
   del.addEventListener('click', () => remove(t))
 
-  li.append(cb, title, del)
+  li.append(cb, title)
+  if (t.image_url) {
+    const link = document.createElement('a')
+    link.href = t.image_url
+    link.target = '_blank'
+    link.rel = 'noopener'
+    const img = document.createElement('img')
+    img.className = 'thumb'
+    img.src = t.image_url
+    img.alt = ''
+    img.loading = 'lazy'
+    link.append(img)
+    li.append(link)
+  }
+  li.append(del)
   return li
 }
 
@@ -153,8 +173,19 @@ form.addEventListener('submit', async (e) => {
   const v = input.value.trim()
   if (!v) return
   try {
-    todos.push(await api('POST', '/api/todos', { title: v }))
+    const file = fileInput.files[0]
+    let created
+    if (file) {
+      const fd = new FormData()
+      fd.append('title', v)
+      fd.append('image', file)
+      created = await api('POST', '/api/todos', fd)
+    } else {
+      created = await api('POST', '/api/todos', { title: v })
+    }
+    todos.push(created)
     input.value = ''
+    fileInput.value = ''
     clearError()
     render()
   } catch (err) { showError(err.message) }
