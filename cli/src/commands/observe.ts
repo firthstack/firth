@@ -7,6 +7,8 @@ import { readAuditOffset, writeAuditOffset, readNewAuditLines } from '../sync-st
 import { apiFromDeps } from './project.js'
 import type { CliDeps } from '../index.js'
 import type { FirthApi } from '../api.js'
+import { installObserve, uninstallObserve } from '../observe/install.js'
+import { renderReport } from '../observe/report.js'
 
 const BATCH = 500
 
@@ -46,5 +48,29 @@ export async function observeSync(argv: string[], deps: CliDeps & { makeApi?: ()
   let msg = `synced ${recorded} new finding(s)`
   if (skipped > 0) msg += ` (${skipped} already uploaded)`
   deps.print(msg)
+  return 0
+}
+
+export async function observeInstall(_argv: string[], deps: CliDeps): Promise<number> {
+  const res = installObserve({ cwd: deps.cwd })
+  const targets = [res.claude && '.claude/settings.json', res.codex && '.codex/hooks.json'].filter(Boolean).join(' + ')
+  deps.print(`installed Firth observe hook → ${targets || '(no harness config written)'}`)
+  deps.print('local, read-only audit — nothing leaves your machine until you run `firth observe sync`')
+  return 0
+}
+
+export async function observeUninstall(_argv: string[], deps: CliDeps): Promise<number> {
+  uninstallObserve(deps.cwd)
+  deps.print('removed the Firth observe hook from .claude/settings.json + .codex/hooks.json')
+  return 0
+}
+
+export async function observeReport(_argv: string[], deps: CliDeps): Promise<number> {
+  const path = join(deps.cwd, '.firth', 'audit.jsonl')
+  if (!existsSync(path)) { deps.print('no audit log at .firth/audit.jsonl — nothing recorded yet (is the observe hook installed?)'); return 0 }
+  const rows = readFileSync(path, 'utf8').split('\n').filter((l) => l.trim()).flatMap((l) => {
+    try { return [JSON.parse(l)] } catch { return [] }
+  })
+  deps.print(renderReport(rows))
   return 0
 }

@@ -10,7 +10,7 @@ import { secrets } from './commands/secrets.js'
 import { skillsPull } from './commands/skills.js'
 import { deploy } from './commands/deploy.js'
 import { events } from './commands/events.js'
-import { observeSync } from './commands/observe.js'
+import { observeSync, observeInstall, observeUninstall, observeReport } from './commands/observe.js'
 import { status } from './commands/status.js'
 import { manifest } from './commands/manifest.js'
 import { approvals, approve, deny, policy } from './commands/govern.js'
@@ -48,6 +48,9 @@ Commands:
   deploy <dir>|--image <url> Deploy from a source dir (Dockerfile) or a pre-built image (--from, --port)
   events                    Show the project's action↔side-effect timeline (--branch, --limit)
   observe sync              Upload local observe-hook findings (.firth/audit.jsonl) to the timeline
+  observe install           Install the local read-only audit hook (Claude Code + Codex)
+  observe uninstall         Remove the audit hook from both harnesses
+  observe report            Print the local credential-audit report (.firth/audit.jsonl)
   status                    Show login, linked project, and current branch
   manifest                  Show the env manifest (databases/storage/compute per env) [--json]
   project delete            Delete the linked project + all resources (--yes)
@@ -75,6 +78,9 @@ COMMANDS['skills pull'] = skillsPull
 COMMANDS['deploy'] = deploy
 COMMANDS['events'] = events
 COMMANDS['observe sync'] = observeSync
+COMMANDS['observe install'] = observeInstall
+COMMANDS['observe uninstall'] = observeUninstall
+COMMANDS['observe report'] = observeReport
 COMMANDS['branch switch'] = branchSwitch
 COMMANDS['branch delete'] = branchDelete
 COMMANDS['project delete'] = projectDelete
