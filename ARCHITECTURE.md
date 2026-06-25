@@ -130,6 +130,8 @@ Two event streams keyed by `(project, branch)`, correlated into one timeline:
 - **Agent actions** — from the Node observe hook (Claude Code + Codex `PostToolUse`; what the agent did: files edited, commands run, credentials touched) → control-plane ingest.
 - **Resource side-effects** — deploys, migrations, provisioning, usage, provider logs.
 
+**Harness-coverage caveat (Codex):** the Codex hook fires in **interactive** Codex sessions; headless `codex exec` runs do **not** fire `PostToolUse` hooks (observed on codex-cli 0.138.0), so `codex exec` automation is not audited. Claude Code `PostToolUse` fires in all modes. Value detection is harness-agnostic; per-tool *file-write* classification for Codex `apply_patch` is best-effort pending interactive verification (codex#16732).
+
 The unit is "agent action ↔ resource side-effect" (e.g. *agent issued a refund → which rows changed → which credential was used*) — deliberately **not** the prompt/token/trace unit that dev-time agent-observability tools (LangSmith, Langfuse, ...) track. Failure analysis is a triage layer on top of this timeline (v1 collects the data; triage logic comes later). This is the agent-aware "what state is this project in / what just broke" surface.
 
 ## 11. Security

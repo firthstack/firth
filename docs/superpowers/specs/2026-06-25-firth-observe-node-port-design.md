@@ -207,6 +207,16 @@ smoke test against a real Codex install (does PostToolUse fire for `apply_patch`
 what is its exact `tool_input` shape?) before claiming file-write parity. Bash /
 MCP / value-in-command coverage is unaffected.
 
+**Smoke-test result (2026-06-25, codex-cli 0.138.0, `hooks` feature stable+enabled).**
+Run via `codex exec`, `PostToolUse` hooks did **not** fire at all — neither for
+`apply_patch` (file create, confirmed via diff) nor for a confirmed shell command
+(`echo …`) — across both registration paths (`-c hooks…` override and a project
+`.codex/hooks.json` + `trust_level="trusted"` + `--dangerously-bypass-hook-trust`).
+**Conclusion:** headless `codex exec` runs are not audited; the
+`apply_patch`-in-**interactive**-mode question (codex#16732) remains open pending
+an interactive Codex TUI session. **No code impact** — value detection is
+shape-independent and the `apply_patch` path classification degrades safely.
+
 ### Auto-install at link time — `ensureObserveHook(deps)`
 
 Called from `projectCreate` and `projectLink` immediately after `ensureSkills`,
