@@ -1,0 +1,45 @@
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { scanEvent, type ToolEvent } from './scanner.js'
+
+export function recordFindings(event: ToolEvent, baseDir: string): number {
+  const firthDir = join(baseDir, '.firth')
+  const firthAbs = resolve(firthDir)
+  const selfDir = dirname(fileURLToPath(import.meta.url))
+  const ignore = (p: string): boolean => {
+    let ap: string
+    try { ap = resolve(p) } catch { return false }
+    return ap.startsWith(firthAbs) || ap.startsWith(selfDir)
+  }
+  const findings = scanEvent(event, { ignorePath: ignore })
+  if (findings.length === 0) return 0
+  const common = {
+    ts: new Date().toISOString(),
+    session_id: event.session_id ?? null,
+    tool: event.tool_name ?? null,
+    cwd: event.cwd ?? null,
+  }
+  mkdirSync(firthDir, { recursive: true })
+  const lines = findings.map((f) => JSON.stringify({ ...common, ...f })).join('\n') + '\n'
+  appendFileSync(join(firthDir, 'audit.jsonl'), lines, 'utf8')
+  return findings.length
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const c of process.stdin) chunks.push(c as Buffer)
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+export async function main(): Promise<void> {
+  let event: ToolEvent
+  try { event = JSON.parse(await readStdin()) } catch { process.exit(0) }
+  const base = process.env.CLAUDE_PROJECT_DIR || (event.cwd as string) || '.'
+  try { recordFindings(event, base) } catch (e) { process.stderr.write(`firth-observe: ${e instanceof Error ? e.message : e}\n`) }
+  process.exit(0)
+}
+
+// Run only when executed directly (the materialized .firth/observe/hook.js entry).
+// Imported by tests → guard is false → main() does not run.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) void main()
