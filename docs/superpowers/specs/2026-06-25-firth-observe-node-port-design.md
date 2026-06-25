@@ -9,9 +9,9 @@ Remove the Python runtime dependency from Firth Observe. Port the credential
 touch/exposure hook (today `observe/hook.py` + `observe/scanner.py`) to
 TypeScript so the whole Observe stack is Node, ships with the `firth` npm
 package for free, and can be **auto-installed during `firth project link` /
-`firth project create`** — the way related agent skills already are. The
-detection logic, the redacted local log, and the explicit upload path are
-preserved unchanged in behavior.
+`firth project create`** — the way related agent skills already are — for
+**both Claude Code and Codex**. The detection logic, the redacted local log, and
+the explicit upload path are preserved unchanged in behavior.
 
 This is the follow-up to the auto-install discussion: today the Python hook is
 **not shipped** with the npm CLI at all (`cli/package.json` `files` is
@@ -30,9 +30,10 @@ and runs on the Node that installed `firth`.
 - **Changing what is detected** or the audit-line format. This is a port, not a
   detector rewrite — `scanEvent` output is field-for-field equivalent to
   `scan_event`.
-- **Other harnesses.** The hook remains a Claude Code `PostToolUse` hook
-  (`.claude/settings.json`). The scanner stays harness-agnostic so a future
-  adapter is a thin wrapper.
+- **Harnesses beyond Claude Code + Codex.** This port wires **both** Claude Code
+  and Codex `PostToolUse` (see "Two harnesses" below). The scanner stays
+  harness-agnostic so any further adapter (Cursor, etc.) is a thin wrapper — but
+  only Claude Code + Codex are wired in v1.
 - **Changing the `events` ingest / `firth events` timeline.** Untouched.
 
 ## Decisions locked (from brainstorming)
@@ -42,6 +43,9 @@ and runs on the Node that installed `firth`.
    (`hook.py`, `scanner.py`, `summary.py`, `install.py`, `selftest.py`). The TS
    scanner becomes the single source of truth; `summary.py`'s local report is
    ported to `firth observe report`.
+3. **Two harnesses:** wire both Claude Code and Codex `PostToolUse` in this
+   port. Same `hook.js` + scanner; the only deltas are the registration target
+   and the `apply_patch` tool mapping (see "Two harnesses").
 
 ## Architecture
 
@@ -63,6 +67,12 @@ key structural win over the Python layout (which lived outside `cli/`).
     `snippet` redaction, the recursive `leaves` walk over input/output, and the
     position-sorted overlap dedup. Regexes translated to JS (note `(?i)` →
     `/i`, `\b` semantics, named-group/`lastindex` → JS capture-group handling).
+  - **Harness-agnostic by design.** The value-detection path (the `leaves` walk
+    over all string fields) is tool- and harness-independent, so it covers
+    Codex unchanged. `classify`/path-extraction additionally learns Codex's
+    `apply_patch` tool so a file-targeted secret is classified like Claude's
+    `Write`/`Edit` (see "Two harnesses"); when it can't, it degrades to a generic
+    value finding — never a miss of the value itself.
   - **Invariant:** a `Finding` never carries a raw secret — only the fingerprint
     and a redacted snippet. Enforced by a test.
 - `cli/src/observe/hook.ts` — thin stdin wrapper, the `node` entry the hook
@@ -78,9 +88,11 @@ key structural win over the Python layout (which lived outside `cli/`).
 - `cli/src/observe/report.ts` — `firth observe report`. Reads the local
   `.firth/audit.jsonl` and renders the exposures-first / touches summary. Port
   of `summary.py`.
-- `cli/src/observe/install.ts` — `.claude/settings.json` register / unregister
-  + the hook-file materialization. Port of `install.py` logic, plus the upsert
-  migration below.
+- `cli/src/observe/install.ts` — register / unregister into **both**
+  `.claude/settings.json` and `.codex/hooks.json`, plus the hook-file
+  materialization into `.firth/observe/`. Port of `install.py` logic, plus the
+  upsert-by-marker migration. Each harness writer is independent (one failing
+  doesn't abort the other).
 - `cli/src/ensure-observe.ts` — link-time auto-install, mirroring
   `cli/src/ensure-skills.ts`.
 
@@ -106,7 +118,7 @@ handled by **re-materializing (overwrite) on every `firth project link` /
 `firth observe install`**, and by comparing the `VERSION` stamp so an upgraded
 CLI refreshes the copy.
 
-### settings.json registration — upsert by marker (handles migration)
+### Claude Code registration — upsert by marker (handles migration)
 
 The entry shape (mirrors the Python one, marker preserved so detection is
 uniform):
@@ -127,6 +139,74 @@ entry** that prior repos have — after `observe/` is deleted that command error
 replacing it on the next link is the migration path. `uninstall` removes all
 marker-matched entries.
 
+## Two harnesses — Claude Code + Codex
+
+Codex's `PostToolUse` is near-identical to Claude Code's, so **the same
+`hook.js` + `scanner.js` serve both** — the deltas are the registration target
+and the `apply_patch` tool mapping. (Verified against the official Codex hooks
+docs.)
+
+**Shared contract.** Codex delivers one JSON object on stdin with `tool_name`,
+`tool_input` (Bash uses `tool_input.command`), `tool_response`, `cwd`,
+`session_id` (plus Codex extras `turn_id`, `tool_use_id`, `hook_event_name`,
+`model`). This is the shape `scanEvent` already consumes. Codex PostToolUse can
+block, but we deliberately don't: exit 0 + no stdout is a read-only no-op in
+both harnesses, preserving the trust model. The hook reads its base dir from
+`$CLAUDE_PROJECT_DIR` **or** the stdin `cwd` (already a fallback in `hook.py`),
+so it needs no Claude-specific env under Codex.
+
+**Codex registration target.** Not `.claude/settings.json` but a project-level
+`<repo>/.codex/hooks.json` (Codex also accepts a `[hooks]` table in
+`.codex/config.toml`; we write `hooks.json` — simpler to edit idempotently). The
+entry mirrors Claude's but Codex's `command` is a **single string** (no separate
+`args` array):
+
+```json
+{ "hooks": { "PostToolUse": [ {
+  "matcher": "*",
+  "hooks": [ { "type": "command",
+    "command": "node \"${cwd}/.firth/observe/hook.js\"",
+    "timeout": 15, "_firth": "firth-observe" } ]
+} ] } }
+```
+
+Two Codex-specific caveats, both surfaced to the user (printed), not papered
+over:
+- **Trust gate.** Project-local `.codex/` hooks fire only after the user trusts
+  that project layer in Codex. Auto-install can't grant trust — print a one-line
+  "trust this project's `.codex/` in Codex to activate the hook" note.
+- **Path resolution.** Codex does not expand `${CLAUDE_PROJECT_DIR}`. Prefer a
+  cwd-relative path (`.firth/observe/hook.js`) if Codex runs project hooks with
+  cwd = repo root; **verify at implementation**, else resolve an absolute path to
+  the materialized file at install time. (The `${cwd}` shown above is a
+  placeholder for whichever Codex supports — pin it in the plan.)
+
+**`apply_patch` tool mapping — and why coverage is robust anyway.** Codex edits
+files via `apply_patch` (one tool carrying a patch payload), not Claude's
+`Write`/`Edit`/`MultiEdit` + `file_path`. This matters **only for the
+path/sink classification** in `_classify` (is the target a secret file? is this
+a write into a non-secret file?), which is keyed on Claude tool names. The
+load-bearing design principle:
+
+- **Value detection is shape-independent.** `scanEvent` walks every string leaf
+  of `tool_input`/`tool_response`, so a secret *value* inside an `apply_patch`
+  payload is still detected and redacted regardless of the payload's structure —
+  Codex value-exposure coverage works with zero `apply_patch` knowledge.
+- **Path/sink classification is the only tool-name-specific part.** Teach
+  `_classify` (+ the path extractor) to recognize `apply_patch`: pull the edited
+  file path(s) from its payload so a secret written via Codex is classified as
+  `write_secret_file` / `nonsecret_file` like Claude's edits. If the payload
+  shape can't be parsed on the installed Codex version, this **degrades to the
+  generic value finding** — no crash, no missed value exposure.
+
+**Risk to flag (version-dependent).** The official docs list `apply_patch` among
+the tools PostToolUse fires for, but Codex historically fired PostToolUse only
+for Bash and added `apply_patch`/MCP coverage more recently (see codex#16732).
+So Codex *file-write* auditing has a real asterisk: the plan MUST include a
+smoke test against a real Codex install (does PostToolUse fire for `apply_patch`?
+what is its exact `tool_input` shape?) before claiming file-write parity. Bash /
+MCP / value-in-command coverage is unaffected.
+
 ### Auto-install at link time — `ensureObserveHook(deps)`
 
 Called from `projectCreate` and `projectLink` immediately after `ensureSkills`,
@@ -136,29 +216,37 @@ following the `ensure-skills.ts` pattern exactly:
   (mirror of `skillsInstalled`); `config.ts` gains `markObserveInstalled` and
   reads the flag. Runs once per linked project.
 - Steps: (1) materialize `dist/observe/{hook,scanner}.js` + `VERSION` into
-  `.firth/observe/`; (2) idempotently upsert the `settings.json` entry;
-  (3) print a clear notice —
-  `installed Firth observe hook → .claude/settings.json (local, read-only audit; nothing leaves your machine until you run \`firth observe sync\`)`;
-  (4) `markObserveInstalled`.
+  `.firth/observe/`; (2) idempotently upsert **both** harness entries —
+  `.claude/settings.json` and `.codex/hooks.json` (mirroring `ensure-skills`,
+  which already targets claude-code + codex); (3) print a clear notice —
+  `installed Firth observe hook → .claude/settings.json + .codex/hooks.json (local, read-only audit; nothing leaves your machine until you run \`firth observe sync\`)`
+  plus the Codex trust-gate note; (4) `markObserveInstalled`.
+- Both registrations are unconditional and harmless when a harness is unused (a
+  dormant config file), matching how `ensure-skills` writes both skill dirs.
 - Wrapped in `try/catch` — convenience only, **never blocks or fails** the host
-  command. Touches only `.claude/settings.json` (Claude Code). `.firth/` is
-  already gitignored by `writeProjectLink`.
+  command. Touches `.claude/settings.json`, `.codex/hooks.json`, and
+  `.firth/observe/`. Only `.firth/` is gitignored (already, by
+  `writeProjectLink`) — it holds the materialized hook + the local log. The two
+  harness config files are the **user's own config** we upsert into; Firth does
+  not gitignore them (consistent with how `.claude/settings.json` is already
+  left untracked-or-tracked per the user's choice, not Firth-managed).
 
 ### CLI surface — `firth observe …`
 
 `firth observe sync` is unchanged (already Node). Add subcommands and wire them
 in `cli/src/index.ts` (dispatch + USAGE):
 
-- `firth observe install` — manual (re)install: materialize + upsert-register.
-- `firth observe uninstall` — remove all marker-matched `settings.json` entries
-  (and the `.firth/observe/` files).
+- `firth observe install` — manual (re)install: materialize + upsert-register
+  into **both** `.claude/settings.json` and `.codex/hooks.json`.
+- `firth observe uninstall` — remove all marker-matched entries from **both**
+  harness config files (and the `.firth/observe/` files).
 - `firth observe report` — render the local audit report (`report.ts`).
 
 ## Data flow (unchanged in shape)
 
 ```
-agent tool call
-  → Claude Code PostToolUse
+agent tool call (Claude Code or Codex)
+  → PostToolUse  (.claude/settings.json | .codex/hooks.json)
     → node .firth/observe/hook.js   (scanEvent → redacted findings)
       → append .firth/audit.jsonl   (local only)
   … later, explicitly …
@@ -173,8 +261,9 @@ firth observe sync                  (existing: watermark + dedup_key → POST /e
   skipped, as today.
 - `ensureObserveHook`: `try/catch`, never blocks the host command; a failure
   leaves a friendly note and the project still linked.
-- `install` on a malformed `settings.json`: report and abort that command (don't
-  clobber a file we can't parse) — mirrors `install.py`'s parse-error exit.
+- `install` on a malformed `settings.json` / `hooks.json`: report and skip that
+  one target (don't clobber a file we can't parse) — mirrors `install.py`'s
+  parse-error exit; a parse failure on one harness must not abort the other.
 - All existing API/CLI error discipline (static strings, no secret/PII) unchanged.
 
 ## Trust model (restated, not changed)
@@ -192,31 +281,51 @@ secret value.
   invariant); placeholder + reference values filtered; secret-file detection and
   safe-template (`.example`/`.pub`) exclusion; `classify` severity/sink matrix
   (network/git → high, stdout → warn, nonsecret_file write → high, secret-file
-  read/write → touch); overlap dedup yields one finding per secret.
+  read/write → touch); overlap dedup yields one finding per secret. **Codex
+  cases:** a Codex Bash event (`tool_name: "Bash"`, `tool_input.command`) scans
+  identically; a secret value inside an `apply_patch` payload is detected
+  (shape-independent) even if the file-path classification can't resolve; an
+  `apply_patch` write to a secret-file path classifies as `write_secret_file`
+  once the payload shape is wired.
 - `cli/test/observe-hook.test.ts` — stdin JSON → appends one redacted line per
   finding to `audit.jsonl`; empty findings → no write; exit 0 + no stdout;
-  self-writes under `.firth/` ignored.
-- `cli/test/observe-install.test.ts` — register is idempotent; upsert removes a
-  pre-existing (Python-style) `_firth` entry rather than duplicating; uninstall
-  removes only marker-matched entries; malformed settings.json aborts safely.
+  self-writes under `.firth/` ignored; base dir falls back to stdin `cwd` when
+  `$CLAUDE_PROJECT_DIR` is unset (the Codex path).
+- `cli/test/observe-install.test.ts` — for **both** targets: register is
+  idempotent; upsert removes a pre-existing (Python-style) `_firth` entry rather
+  than duplicating; uninstall removes only marker-matched entries; a malformed
+  config on one harness is skipped without aborting the other; the Codex entry
+  uses a single `command` string (no `args`), the Claude entry uses
+  `command`+`args`.
 - `cli/test/observe-report.test.ts` — renders the summary from a sample log.
-- `cli/test/ensure-observe.test.ts` — materializes + registers once; the
-  `observeInstalled` marker prevents a second run; never throws.
+- `cli/test/ensure-observe.test.ts` — materializes + registers into both
+  harnesses once; the `observeInstalled` marker prevents a second run; never
+  throws.
+- **Manual smoke test (not vitest):** against a real Codex install, confirm
+  PostToolUse fires for `apply_patch` and capture its actual `tool_input` shape
+  (codex#16732 risk). Pin the shape in code only after this passes; until then
+  the `apply_patch` path classification stays best-effort.
 
 ## Cleanup
 
 - Delete the top-level `observe/` directory entirely.
 - Update `README.md`, `observe`-related docs, and `ARCHITECTURE.md` §4
-  ("Observability … `observe/` hook ingest") so wording reflects the Node hook
-  and the `firth observe install`/`report` commands (drop `python3 observe/*`).
+  ("Observability … `observe/` hook ingest") so wording reflects the Node hook,
+  **both Claude Code + Codex harnesses**, and the `firth observe
+  install`/`report` commands (drop `python3 observe/*`).
 
 ## Build order (informs the plan)
 
 1. `scanner.ts` (port + redaction-invariant tests) — the single source of truth.
-2. `hook.ts` (stdin wrapper + tests).
-3. `install.ts` (materialize + upsert-register/uninstall + migration test) and
-   `report.ts` (+ test).
-4. `ensure-observe.ts` + `config.ts` `observeInstalled` marker + wire into
-   `projectCreate`/`projectLink` (+ test).
-5. `firth observe install|uninstall|report` dispatch + USAGE in `index.ts`.
-6. Delete `observe/`; sync README / docs / ARCHITECTURE §4.
+   Include the harness-agnostic value-scan tests.
+2. `hook.ts` (stdin wrapper + tests; `cwd`-fallback for the Codex path).
+3. `install.ts` — materialize + upsert-register/uninstall for **both**
+   `.claude/settings.json` and `.codex/hooks.json` (+ migration + per-target
+   isolation tests) and `report.ts` (+ test).
+4. `apply_patch` mapping in `scanner.ts` — **gated on the manual Codex smoke
+   test** confirming firing + payload shape; ship the shape-independent value
+   path first, add path classification when the shape is pinned.
+5. `ensure-observe.ts` + `config.ts` `observeInstalled` marker + wire into
+   `projectCreate`/`projectLink`, installing both harnesses (+ test).
+6. `firth observe install|uninstall|report` dispatch + USAGE in `index.ts`.
+7. Delete `observe/`; sync README / docs / ARCHITECTURE §4.
