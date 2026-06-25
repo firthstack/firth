@@ -108,3 +108,11 @@ test('DELETE /api/todos?completed=true batch-deletes image objects', async () =>
   assert.equal(res.body.deleted, 1)
   assert.deepEqual(fake.calls.batchDeletes, [['todos/fake.jpg']])
 })
+
+test('POST /api/todos with a file under an unexpected field returns 400 (not 500)', async () => {
+  const res = await auth(request(app).post('/api/todos'))
+    .field('title', 'oops')
+    .attach('wrongfield', Buffer.from('x'), { filename: 'p.jpg', contentType: 'image/jpeg' })
+  assert.equal(res.status, 400)
+  assert.equal(fake.calls.uploads.length, 0)
+})

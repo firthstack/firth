@@ -21,7 +21,10 @@ export function makeApp(pool, storage = makeStorage()) {
   const app = express()
   app.use(express.json())
 
-  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_BYTES } })
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_IMAGE_BYTES, files: 1, fields: 1, fieldSize: 8 * 1024, parts: 3 },
+  })
 
   // Map a db row (carrying internal image_key) to the client shape: a presigned image_url, no image_key.
   const toClient = async (row) => {
@@ -134,7 +137,11 @@ export function makeApp(pool, storage = makeStorage()) {
   app.use((err, _req, res, _next) => {
     if (err instanceof ValidationError) return res.status(400).json({ error: err.message })
     if (err instanceof EmailTakenError) return res.status(409).json({ error: err.message })
-    if (err && err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'image too large (max 5 MB)' })
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({
+        error: err.code === 'LIMIT_FILE_SIZE' ? 'image too large (max 5 MB)' : 'invalid upload',
+      })
+    }
     console.error(err)
     res.status(500).json({ error: 'internal error' })
   })
