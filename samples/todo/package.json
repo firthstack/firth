@@ -11,6 +11,10 @@
     "@aws-sdk/client-s3": "^3.1075.0",
     "@aws-sdk/s3-request-presigner": "^3.1075.0",
     "express": "^4.21.2",
+    "multer": "^2.2.0",
     "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2"
   }
 }
