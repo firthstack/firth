@@ -13,7 +13,7 @@ function cliVersion(): string {
 function isFirthHook(h: { _firth?: string; command?: string; args?: string[] }): boolean {
   if (h._firth === MARKER) return true
   const blob = `${h.command ?? ''} ${(h.args ?? []).join(' ')}`
-  return blob.includes('observe/hook') // matches old observe/hook.py and new .firth/observe/hook.js
+  return blob.includes('observe/hook.') // matches old observe/hook.py and new .firth/observe/hook.js; requires trailing dot to avoid false-matching user paths like observe/hooks-report.sh
 }
 
 type Group = { matcher?: string; hooks?: Array<Record<string, unknown>> }

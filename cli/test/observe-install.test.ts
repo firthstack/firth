@@ -74,6 +74,21 @@ test('a malformed config on one harness is skipped without aborting the other', 
   expect(existsSync(join(cwd, '.claude', 'settings.json'))).toBe(true)
 })
 
+test('user hook whose args contain observe/hook substring (no dot) is NOT clobbered', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'firth-'))
+  mkdirSync(join(cwd, '.claude'), { recursive: true })
+  writeFileSync(join(cwd, '.claude', 'settings.json'), JSON.stringify({ hooks: { PostToolUse: [
+    { matcher: 'Bash', hooks: [{ type: 'command', command: 'node', args: ['scripts/observe/hooks-report.sh'] }] },
+  ] } }))
+  installObserve({ cwd, assetDir: fakeAssets() })
+  const post = readJson(join(cwd, '.claude', 'settings.json')).hooks.PostToolUse
+  const allHooks = post.flatMap((g: any) => g.hooks)
+  // user's hook must still be present
+  expect(allHooks.some((h: any) => Array.isArray(h.args) && h.args.includes('scripts/observe/hooks-report.sh'))).toBe(true)
+  // exactly one firth-observe entry
+  expect(allHooks.filter((h: any) => h._firth === 'firth-observe')).toHaveLength(1)
+})
+
 test('uninstall removes firth entries from both harnesses', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'firth-'))
   installObserve({ cwd, assetDir: fakeAssets() })
