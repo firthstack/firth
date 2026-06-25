@@ -22,7 +22,7 @@ export function writeConfig(cfg: CliConfig, home = homedir()): void {
   writeFileSync(gpath(home), JSON.stringify(cfg, null, 2))
 }
 
-export type ProjectLink = { projectId: string; branch?: { id: string; name: string }; skillsInstalled?: boolean }
+export type ProjectLink = { projectId: string; branch?: { id: string; name: string }; skillsInstalled?: boolean; observeInstalled?: boolean }
 
 export function readProjectLink(cwd = process.cwd()): ProjectLink | null {
   const p = lpath(cwd)
@@ -34,6 +34,14 @@ export function markSkillsInstalled(cwd = process.cwd()): void {
   const link = readProjectLink(cwd)
   if (!link) return
   link.skillsInstalled = true
+  writeFileSync(lpath(cwd), JSON.stringify(link, null, 2))
+}
+
+// One-time marker so the observe-hook install notice prints once per linked project.
+export function markObserveInstalled(cwd = process.cwd()): void {
+  const link = readProjectLink(cwd)
+  if (!link) return
+  link.observeInstalled = true
   writeFileSync(lpath(cwd), JSON.stringify(link, null, 2))
 }
 
