@@ -5,6 +5,7 @@ import type { CliDeps } from '../index.js'
 import { formatTeardown } from './util.js'
 import { ensureFlyctl } from '../fly.js'
 import { ensureSkills } from '../ensure-skills.js'
+import { ensureObserveHook } from '../ensure-observe.js'
 import { reportIfGated } from './govern.js'
 
 // Build a FirthApi from stored config; tests can override via deps.makeApi.
@@ -28,6 +29,7 @@ export async function projectCreate(argv: string[], deps: CliDeps & { makeApi?: 
   setCurrentBranch({ id: out.defaultBranch.id, name: out.defaultBranch.name }, deps.cwd)
   deps.print(`created project ${out.project.name} (${out.project.id}); linked + on branch ${out.defaultBranch.name}`)
   await ensureSkills(deps)
+  await ensureObserveHook(deps)
   return 0
 }
 
@@ -46,6 +48,7 @@ export async function projectLink(argv: string[], deps: CliDeps & { makeApi?: ()
   } catch { /* the id is still linked; secrets/events fall back to the default branch */ }
   deps.print(`linked this directory to project ${id}${on}`)
   await ensureSkills(deps)
+  await ensureObserveHook(deps)
   return 0
 }
 

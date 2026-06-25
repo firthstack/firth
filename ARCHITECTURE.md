@@ -46,7 +46,7 @@ Two same-named-but-different concepts kept distinct in code and docs: a **`firth
 | Metadata DB | InsForge **Postgres + RLS** | migrations |
 | Resource adapters | compute | **Neon / S3 / Fly adapters (the core)** |
 | Secret seam | ciphertext in **Firth DB**; KEK in InsForge **secrets / compute env** | seam + scoped-env generation |
-| Observability | InsForge **logs** + Postgres tables | `observe/` hook ingest + correlation |
+| Observability | InsForge **logs** + Postgres tables | Node observe hook (`cli/src/observe`, Claude Code + Codex) + correlation |
 | Metering | InsForge **scheduled jobs** (stubbed in v1) | metering logic |
 
 The genuinely-from-scratch code is small: the three provider adapters, the orchestration + secret seam, the Observe correlation, and the CLI + web. Everything else is InsForge configuration + migrations.
@@ -127,7 +127,7 @@ A branch ≈ a Neon DB branch + that branch's own secret (connection string) + t
 
 Two event streams keyed by `(project, branch)`, correlated into one timeline:
 
-- **Agent actions** — from the `observe/` hook (what the agent did: files edited, commands run, credentials touched) → control-plane ingest.
+- **Agent actions** — from the Node observe hook (Claude Code + Codex `PostToolUse`; what the agent did: files edited, commands run, credentials touched) → control-plane ingest.
 - **Resource side-effects** — deploys, migrations, provisioning, usage, provider logs.
 
 The unit is "agent action ↔ resource side-effect" (e.g. *agent issued a refund → which rows changed → which credential was used*) — deliberately **not** the prompt/token/trace unit that dev-time agent-observability tools (LangSmith, Langfuse, ...) track. Failure analysis is a triage layer on top of this timeline (v1 collects the data; triage logic comes later). This is the agent-aware "what state is this project in / what just broke" surface.
