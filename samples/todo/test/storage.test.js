@@ -1,19 +1,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  makeStorage, contentTypeToExt, publicBaseFromEndpoint,
-  ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES,
+  makeStorage, contentTypeToExt,
+  ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, IMAGE_URL_TTL_SECONDS,
 } from '../storage.js'
 
 const ENV = {
-  AWS_ENDPOINT_URL_S3: 'https://app.us-east.insforge.app/storage/v1/s3',
-  AWS_REGION: 'us-east-2',
-  AWS_ACCESS_KEY_ID: 'x',
-  AWS_SECRET_ACCESS_KEY: 'y',
+  AWS_ENDPOINT_URL_S3: 'https://t3.storage.dev',
+  AWS_REGION: 'auto',
+  AWS_ACCESS_KEY_ID: 'tid_test',
+  AWS_SECRET_ACCESS_KEY: 'tsec_test',
   BUCKET_NAME: 'mybucket',
 }
 
 // A fake S3 client: records every command's `.input` instead of hitting the network.
+// Used for the send-based ops (upload/delete). presignedGetUrl needs a real client (local signing).
 function fakeClient() {
   const sent = []
   return { sent, async send(cmd) { sent.push(cmd); return {} } }
@@ -21,19 +22,9 @@ function fakeClient() {
 
 test('constants', () => {
   assert.equal(MAX_IMAGE_BYTES, 5 * 1024 * 1024)
+  assert.equal(IMAGE_URL_TTL_SECONDS, 3600)
   assert.ok(ALLOWED_IMAGE_TYPES.has('image/jpeg'))
   assert.ok(!ALLOWED_IMAGE_TYPES.has('text/plain'))
-})
-
-test('publicBaseFromEndpoint strips the /storage/v1/s3 suffix', () => {
-  assert.equal(
-    publicBaseFromEndpoint('https://app.us-east.insforge.app/storage/v1/s3'),
-    'https://app.us-east.insforge.app',
-  )
-  assert.equal(
-    publicBaseFromEndpoint('https://app.us-east.insforge.app/storage/v1/s3/'),
-    'https://app.us-east.insforge.app',
-  )
 })
 
 test('contentTypeToExt maps allowed types and rejects others', () => {
@@ -44,20 +35,11 @@ test('contentTypeToExt maps allowed types and rejects others', () => {
   assert.throws(() => contentTypeToExt('text/plain'))
 })
 
-test('publicUrl builds the public object URL', () => {
-  const s = makeStorage(ENV, fakeClient())
-  assert.equal(
-    s.publicUrl('todos/abc.jpg'),
-    'https://app.us-east.insforge.app/api/storage/buckets/mybucket/objects/todos/abc.jpg',
-  )
-})
-
-test('uploadImage sends PutObject with the right params and returns key+url', async () => {
+test('uploadImage sends PutObject with the right params and returns a key', async () => {
   const client = fakeClient()
   const s = makeStorage(ENV, client)
-  const { key, url } = await s.uploadImage(Buffer.from('data'), 'image/png')
+  const { key } = await s.uploadImage(Buffer.from('data'), 'image/png')
   assert.match(key, /^todos\/[0-9a-f-]+\.png$/)
-  assert.equal(url, s.publicUrl(key))
   assert.equal(client.sent.length, 1)
   const input = client.sent[0].input
   assert.equal(input.Bucket, 'mybucket')
@@ -87,8 +69,17 @@ test('deleteImages sends one DeleteObjects with all keys', async () => {
   const s = makeStorage(ENV, client)
   await s.deleteImages(['todos/a.jpg', 'todos/b.png'])
   assert.equal(client.sent.length, 1)
+  assert.equal(client.sent[0].input.Bucket, 'mybucket')
   assert.deepEqual(
     client.sent[0].input.Delete.Objects,
     [{ Key: 'todos/a.jpg' }, { Key: 'todos/b.png' }],
   )
+})
+
+test('presignedGetUrl returns a locally-signed URL for the object (no network)', async () => {
+  const s = makeStorage(ENV) // real S3Client; getSignedUrl signs locally using the dummy creds
+  const url = await s.presignedGetUrl('todos/x.jpg')
+  assert.match(url, /^https:\/\/t3\.storage\.dev\/mybucket\/todos\/x\.jpg\?/)
+  assert.match(url, /X-Amz-Signature=/)
+  assert.match(url, /X-Amz-Expires=3600/)
 })
