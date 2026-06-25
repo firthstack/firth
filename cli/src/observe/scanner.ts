@@ -43,6 +43,9 @@ const REFERENCE = /(process\.env|os\.environ|getenv|import\.meta|\$\{|\$[A-Za-z_
 const SECRET_FILE = /(?:^|\/)(?:\.env(?:\.[A-Za-z0-9_]+)?|\.aws\/credentials|\.ssh\/id_(?:rsa|dsa|ecdsa|ed25519)|id_(?:rsa|dsa|ecdsa|ed25519)|\.npmrc|\.pypirc|\.netrc|\.git-credentials|\.kube\/config|kubeconfig|\.docker(?:cfg|\/config\.json)|credentials\.json|service-account[^/]*\.json|[^/]+\.(?:pem|key|p12|pfx|keystore|jks))$/i
 const SECRET_FILE_SAFE = /\.(?:example|sample|template|dist)$|\.pub$/i
 
+// apply_patch envelope markers (Codex). Format-based, so extraction is field-name-independent.
+const PATCH_FILE = /^\*\*\* (?:Add|Update|Delete|Move) File: (.+?)\s*$/gim
+
 const NETWORK = /\b(?:curl|wget|httpie|http|nc|ncat|netcat|scp|sftp|ssh|telnet|rsync)\b/i
 const PRINT = /\b(?:echo|printf|cat|print|less|more|head|tail|xxd|base64|env|printenv|set)\b/i
 const GIT_WRITE = /\bgit\s+(?:add|commit|push|stash)\b/i
@@ -84,6 +87,16 @@ function leaves(obj: unknown, prefix: string): Array<[string, string]> {
   return out
 }
 
+function applyPatchPaths(ti: Record<string, unknown>): string[] {
+  const paths: string[] = []
+  for (const [, text] of leaves(ti, 'input')) {
+    PATCH_FILE.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = PATCH_FILE.exec(text)) !== null) paths.push(m[1])
+  }
+  return paths
+}
+
 function scanText(text: string): Array<[number, number, string, string]> {
   const hits: Array<[number, number, string, string]> = []
   for (const { name, rx, group } of DETECTORS) {
@@ -112,7 +125,7 @@ function scanText(text: string): Array<[number, number, string, string]> {
 function classify(
   tool: string, side: 'input' | 'output', command: string, filePath: string, secretFileTarget: boolean,
 ): [Finding['kind'], Finding['severity'], string, string] {
-  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(tool) && side === 'input') {
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'apply_patch'].includes(tool) && side === 'input') {
     if (secretFileTarget) return ['touch', 'info', 'write_secret_file', `secret written to secret file ${filePath}`]
     return ['exposure', 'high', 'nonsecret_file', `secret written into ${filePath || 'a non-secret file'}`]
   }
@@ -166,7 +179,14 @@ export function scanEvent(event: ToolEvent, opts: { ignorePath?: (p: string) => 
   }
 
   // Value-based rules: scan every string surface of input and output.
-  const secretFileTarget = isSecretFile(filePath)
+  const patchPaths = tool === 'apply_patch' ? applyPatchPaths(ti) : []
+  const secretFileTarget = isSecretFile(filePath) || patchPaths.some((p) => isSecretFile(p))
+  for (const p of patchPaths) {
+    if (isSecretFile(p)) {
+      const base = p.split('/').pop() ?? p
+      add('touch', 'info', 'secret_file', 'apply_patch.input', 'write_secret_file', `file:${base}`, p, `agent wrote secret file ${p} via apply_patch`)
+    }
+  }
   for (const [surface, text] of [...leaves(ti, 'input'), ...leaves(tr, 'output')]) {
     if (!text || text.length > 1_000_000) continue
     const side: 'input' | 'output' = surface.startsWith('input') ? 'input' : 'output'

