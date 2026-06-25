@@ -1,16 +1,29 @@
 # Todo Images — Design
 
 **Date:** 2026-06-25
-**Status:** Approved (pending spec review)
+**Status:** Approved (revised mid-implementation — see Revision History)
+
+## Revision History
+
+- **2026-06-25 (initial):** Approach B — public bucket + stored public URL, assuming the storage
+  backend was the InsForge S3 gateway (which does not support presigned URLs).
+- **2026-06-25 (revised):** A live probe during implementation (plan Task 2) showed the storage backend
+  is actually **Tigris** (`t3.storage.dev`), the bucket is **private**, and **Tigris supports presigned
+  URLs**. Since the only reason to pick the public-bucket approach was the assumed lack of presigned
+  URLs, the user chose the stronger option: **keep the bucket private and serve images via short-lived
+  presigned GET URLs.** Data model simplified to a single `image_key` column; the public-URL column and
+  the "make the bucket public" preflight are removed.
 
 ## Goal
 
 Let a user attach **one optional image** to a todo at **creation time**. The image is uploaded through
-the Express backend to the already-provisioned InsForge S3-compatible bucket (a **public** bucket), and
-the todo stores the image's public URL so the frontend can display a thumbnail with a plain `<img>`.
+the Express backend to the project's already-provisioned **Tigris** (S3-compatible) bucket, which stays
+**private**. The todo row stores only the storage object key (`image_key`); on every read the backend
+mints a short-lived **presigned GET URL** so the frontend can show a thumbnail with a plain `<img>`.
 Same single container (Express + vanilla frontend + direct Postgres) as the existing
-[multi-tenant todo](./2026-06-20-multi-tenant-todo-design.md); we add a storage module, two nullable
-columns on `todos`, multipart handling on the create route, and image cleanup on delete.
+[multi-tenant todo](./2026-06-20-multi-tenant-todo-design.md); we add a storage module, one nullable
+column on `todos`, multipart handling on the create route, presigned-URL serialization on read, and
+image cleanup on delete.
 
 This extends the [multi-tenant todo](./2026-06-20-multi-tenant-todo-design.md). Its spec/plan are the baseline.
 
@@ -19,212 +32,200 @@ This extends the [multi-tenant todo](./2026-06-20-multi-tenant-todo-design.md). 
 - **No multiple images per todo** — exactly one (or zero) image per todo.
 - **No editing/replacing/removing the image after creation** — image is set only at `POST /api/todos`.
   (Title editing and the completion toggle are unchanged.) Deleting the todo deletes its image.
-- **No private/per-user image isolation** — the bucket is public and the image is served by a public
-  URL (trade-off accepted below). The S3 gateway does not support presigned URLs, and its access keys
-  are project-admin, so the only private alternative would be backend byte-proxying — explicitly not chosen.
+- **No public bucket / no permanently public objects** — the bucket stays private; images are reached
+  only through expiring presigned URLs scoped to one object.
 - **No image processing** — no server-side resizing, thumbnail generation, EXIF stripping, or format
   conversion. The original upload is stored as-is and scaled down with CSS for display.
 - **No drag-and-drop or paste-to-upload** — a standard file input only.
+- **No switch to the Tigris-native SDK (`@tigrisdata/storage`)** — we stay on `@aws-sdk/client-s3`
+  (already wired and confirmed working against Tigris) plus `@aws-sdk/s3-request-presigner`, to avoid
+  re-plumbing the storage layer. The native SDK is a viable future alternative, not used here.
 
 ## Decisions (locked)
 
 - **Image count / timing:** one optional image, attached only when creating the todo.
-- **Storage approach (B): public bucket + public URL.** Backend uploads to the public bucket; the todo
-  row stores the public `image_url` (for `<img src>`) and the `image_key` (for deletion). Chosen for the
-  simplest frontend (no blob fetch, no auth header on reads) over strict per-user privacy.
-- **Upload transport to storage:** the S3 gateway via `@aws-sdk/client-s3`, configured from the `.env`
-  vars the app already has (`AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
-  `AWS_SECRET_ACCESS_KEY`, `BUCKET_NAME`). No new secrets, no InsForge admin API key needed.
-  `forcePathStyle: true` is required (virtual-hosted style is unsupported by the gateway).
-- **Upload transport from browser:** `multipart/form-data` parsed by `multer` (memory storage) on the
-  create route. The route stays backward-compatible with a plain-JSON body when no image is sent.
-- **Object key:** `todos/{uuid}.{ext}` — a random UUID makes keys non-enumerable (the only obscurity
-  protection for public objects). `{ext}` derived from the validated content type.
-- **Validation:** content type in `{image/jpeg, image/png, image/webp, image/gif}`; max size **5 MB**.
+- **Storage backend:** Tigris, reached via the S3 protocol at `AWS_ENDPOINT_URL_S3` (e.g.
+  `https://t3.storage.dev`) using the app's existing `.env` vars (`AWS_REGION`, `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY`, `BUCKET_NAME`). No new secrets. `forcePathStyle: true` is required.
+- **Read approach: private bucket + presigned GET URLs.** Upload stays server-side (`PutObject`); the
+  row stores only `image_key`. On every todo read, the backend generates a presigned GET URL
+  (`@aws-sdk/s3-request-presigner`, default TTL **3600s**) and returns it as `image_url`. The bucket is
+  never made public; presigned URLs are unguessable and expire.
+- **Object key:** `todos/{uuid}.{ext}` — a random UUID; `{ext}` from the validated content type.
+- **Allowed content types:** `image/jpeg`, `image/png`, `image/webp`, `image/gif`. Max size **5 MB**.
+- **`image_key` is server-internal** — never returned to clients. Clients only ever see the presigned
+  `image_url` (or `null`).
+- **Upload transport from browser:** `multipart/form-data` parsed by `multer` (memory storage). The
+  create route stays backward-compatible with a plain-JSON body when no image is sent.
 - **Delete semantics:** deleting a todo (single delete or clear-completed) best-effort deletes its
-  storage object(s) after the DB row is removed; a storage-delete failure is logged, not surfaced as a
-  request error (orphaned objects are acceptable and can be GC'd later).
-- **Dependencies added:** `@aws-sdk/client-s3` (upload/delete) and `multer` (multipart parsing).
+  storage object(s) after the DB row is removed; a storage-delete failure is logged, not surfaced
+  (orphaned objects acceptable and GC-able later).
+- **Data-layer return shapes:** `deleteTodo → { deleted: boolean, imageKey: string | null }`;
+  `clearCompleted → { count: number, imageKeys: string[] }` (only non-null keys).
+- **Dependencies added:** `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner` (upload/delete/presign)
+  and `multer` (multipart parsing); `supertest` (dev) for route tests.
 
 ## Architecture
 
 ```
 Create with image:
   Browser ──multipart/form-data (title + image)──> POST /api/todos (requireAuth)
-     → multer parses → validate type+size
-     → storage.uploadImage(buffer, contentType)  ──PutObject──> public bucket
-     → createTodo(pool, userId, title, { imageUrl, imageKey })  → todos row
-     → 201 { ...todo, image_url }
+     → multer parses → validate title (fail fast) → validate image type+size
+     → storage.uploadImage(buffer, contentType)  ──PutObject──> private bucket → { key }
+     → createTodo(pool, userId, title, key)  → todos row (image_key)
+     → toClient(row): presign image_key → 201 { ...todo, image_url } (image_key stripped)
 
-Display:
-  Browser <img src={todo.image_url}>  ──GET (public, no auth)──> public bucket object
+Read (list / create / update responses):
+  every returned row with image_key → storage.presignedGetUrl(key, 3600s) → image_url
+  Browser <img src={todo.image_url}>  ──GET (presigned, no app auth)──> private bucket object
 
 Delete (single / clear-completed):
-  Browser ──DELETE──> route (requireAuth)
-     → DB delete RETURNING image_key
+  Browser ──DELETE──> route → DB delete RETURNING image_key
      → storage.deleteImage(s)(keys)  (best-effort)  ──DeleteObject(s)──> bucket
 ```
 
 ## Schema — `migrations/003_todo_images.sql`
 
 ```sql
--- 003_todo_images.sql — one optional image per todo (public-bucket URL + storage key).
-alter table todos add column if not exists image_url text;
+-- 003_todo_images.sql — one optional image per todo (Tigris storage object key).
+-- Additive and idempotent: a single nullable column; existing rows are unaffected.
 alter table todos add column if not exists image_key text;
 ```
 
-Both columns are nullable; `NULL`/`NULL` means no image. Existing rows are unaffected. Idempotent
-(`if not exists`), consistent with the existing migrations. Applied to the active Firth branch DB first,
-then to `main`'s DB on merge (same flow as 002).
+Nullable; `NULL` means no image. No public-URL column — the URL is generated per read and never stored.
+Applied to the active DB; additive and safe to re-run.
 
 ## Module layout
 
 - **`todo/storage.js` (new)** — single-purpose wrapper over the S3 client, no DB, unit-testable:
-  - `makeStorage(env = process.env)` — builds and returns an `S3Client` + helpers from env. Reading env
-    at construction keeps it testable and lets `makeApp` inject a fake.
-  - `uploadImage(buffer, contentType) → { key, url }` — generates `todos/{uuid}.{ext}`, `PutObject`
-    with `ContentType`, returns the key and the derived public URL.
-  - `deleteImage(key) → void` — `DeleteObject` (best-effort; caller decides error handling).
-  - `deleteImages(keys) → void` — batch `DeleteObjects` for clear-completed (no-op for empty input).
-  - `publicUrl(key) → string` — pure helper: `${PUBLIC_BASE}/<path>/${key}` where `PUBLIC_BASE` is
-    `AWS_ENDPOINT_URL_S3` with the `/storage/v1/s3` suffix stripped. **The exact public object path is
-    verified empirically during implementation** (real upload + `curl`) before the frontend is wired.
-  - `contentTypeToExt` / `EXT_BY_TYPE` — maps allowed content types to file extensions.
-  - `ALLOWED_IMAGE_TYPES`, `MAX_IMAGE_BYTES` — exported constants (shared by `multer` limits + route check).
-- **`todo/db.js` (modified)** — `createTodo` gains an optional image argument; `deleteTodo` and
-  `clearCompleted` return the deleted `image_key`(s).
-- **`todo/server.js` (modified)** — `multer` on the create route; upload-then-create wiring; delete-then-
-  cleanup wiring; `makeApp(pool, storage)` takes an injectable storage.
+  - `makeStorage(env = process.env, client?) → { uploadImage, presignedGetUrl, deleteImage, deleteImages }`.
+    Reads env at construction; an injected `client` (for upload/delete tests) bypasses the real `S3Client`.
+  - `uploadImage(buffer, contentType) → { key }` — generates `todos/{uuid}.{ext}`, `PutObject` with
+    `ContentType`, returns the key (no URL).
+  - `presignedGetUrl(key, expiresIn = IMAGE_URL_TTL_SECONDS) → Promise<string>` — `getSignedUrl` over a
+    `GetObjectCommand`. Local crypto; no network.
+  - `deleteImage(key)` / `deleteImages(keys)` — `DeleteObject` / batch `DeleteObjects` (no-op on empty).
+  - `contentTypeToExt`, `ALLOWED_IMAGE_TYPES`, `MAX_IMAGE_BYTES`, `IMAGE_URL_TTL_SECONDS` — exported.
+- **`todo/db.js` (modified)** — `COLS` includes `image_key`; `createTodo` gains an optional `imageKey`;
+  `deleteTodo`/`clearCompleted` return the deleted key(s); `cleanTitle` exported.
+- **`todo/server.js` (modified)** — `multer` on create; injectable storage in `makeApp`; a `toClient`
+  helper that strips `image_key` and adds a presigned `image_url`, applied to every row-returning route.
 
 ## Data layer (`db.js`) interface
 
-- `COLS` (client-facing) becomes `id, title, completed, image_url, created_at, updated_at`. `image_key`
-  is **internal** (used only server-side for deletion) and is not returned to clients.
-- `createTodo(db, userId, title, image)` — `image` is optional `{ imageUrl, imageKey }` (default none).
-  Inserts `image_url` + `image_key` when provided; otherwise both `NULL`. Returns the client `COLS` row
-  (with `image_url`). `cleanTitle` validation unchanged.
-- `updateTodo(db, userId, id, fields)` — unchanged (title/completed only; image is never updated).
-- `deleteTodo(db, userId, id) → { deleted: boolean, imageKey: string | null }` — `delete ... where id
-  and user_id returning image_key`. `deleted` is whether a row matched; `imageKey` is that row's key
-  (may be `null`). A struct (not a bare value) so "found with no image" can't be confused with "not
-  found" — avoids the falsy-`null` trap. **Changes the existing return type** (was `boolean`); the
-  existing `deleteTodo` tests are updated to assert `.deleted`.
-- `clearCompleted(db, userId) → { count: number, imageKeys: string[] }` — `delete ... where user_id and
-  completed returning image_key`. `count` is the number of deleted rows (all of them); `imageKeys` is
-  only the non-null keys. Keeping a separate `count` preserves the deleted-count semantics even when some
-  cleared todos had no image. **Changes the existing return type** (was a count `number`); the existing
-  `clearCompleted` test is updated to assert `.count`.
-- `listTodos`, user/session functions — unchanged.
+- `COLS` becomes `id, title, completed, image_key, created_at, updated_at`. `image_key` is internal:
+  the server strips it and substitutes a presigned `image_url` before responding (it is never sent raw).
+- `createTodo(db, userId, title, imageKey)` — `imageKey` optional (string or none). Inserts `image_key`
+  when provided, else `NULL`. Returns the row (including `image_key`). `cleanTitle` validation unchanged.
+- `updateTodo(db, userId, id, fields)` — unchanged behavior (title/completed only). Returns the row
+  including `image_key` (so the route can presign it).
+- `deleteTodo(db, userId, id) → { deleted: boolean, imageKey: string | null }` — `delete ... where id and
+  user_id returning image_key`. Struct avoids the falsy-`null` trap.
+- `clearCompleted(db, userId) → { count: number, imageKeys: string[] }` — `delete ... returning
+  image_key`; `count` = all deleted rows, `imageKeys` = the non-null keys.
+- `listTodos`, user/session functions — unchanged (rows now carry `image_key`).
+- `cleanTitle(title)` is exported so the route can validate the title before uploading (no orphan objects).
 
 ## Storage module (`storage.js`) interface
 
 ```js
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+const IMAGE_URL_TTL_SECONDS = 3600
 
-makeStorage(env) → {
-  uploadImage(buffer, contentType) → Promise<{ key, url }>,
+makeStorage(env, client?) → {
+  uploadImage(buffer, contentType) → Promise<{ key }>,
+  presignedGetUrl(key, expiresIn?) → Promise<string>,
   deleteImage(key) → Promise<void>,
   deleteImages(keys) → Promise<void>,   // no-op when keys is empty
-  publicUrl(key) → string,
 }
 ```
 
 - Config: `new S3Client({ endpoint: env.AWS_ENDPOINT_URL_S3, region: env.AWS_REGION, forcePathStyle: true,
   credentials: { accessKeyId: env.AWS_ACCESS_KEY_ID, secretAccessKey: env.AWS_SECRET_ACCESS_KEY } })`,
   bucket `env.BUCKET_NAME`.
-- `uploadImage` rejects (or the route rejects before calling) an unsupported content type.
+- `presignedGetUrl` requires a real `S3Client` (it reads the client's resolved config to sign); the
+  injected-fake-client path is only for `uploadImage`/`deleteImage(s)` param assertions.
 
 ## API
 
 | Method & path | Auth | Body | Behavior | Status |
 |---|---|---|---|---|
-| `POST /api/todos` | yes | `multipart/form-data` (`title`, optional `image`) **or** JSON `{title}` | Validate title; if an image is present validate type/size → upload → create todo with `image_url`/`image_key` | `201`, `400` bad title / bad image type / too large |
-| `GET /api/todos` | yes | — | List the user's todos, each including `image_url` (or `null`) | `200` |
-| `PATCH /api/todos/:id` | yes | `{title?, completed?}` | Unchanged (image not editable) | `200`, `400`, `404` |
+| `POST /api/todos` | yes | `multipart/form-data` (`title`, optional `image`) **or** JSON `{title}` | Validate title (fail fast); if an image is present validate type/size → upload → create with `image_key` → respond with presigned `image_url` | `201`, `400` bad title / bad image type / too large |
+| `GET /api/todos` | yes | — | List the user's todos, each with a freshly presigned `image_url` (or `null`) | `200` |
+| `PATCH /api/todos/:id` | yes | `{title?, completed?}` | Update (image not editable); response includes presigned `image_url` | `200`, `400`, `404` |
 | `DELETE /api/todos/:id` | yes | — | Delete the user's todo, then best-effort delete its image object | `204`, `404` |
-| `DELETE /api/todos?completed=true` | yes | — | Clear the user's completed todos, then best-effort delete their image objects | `200 {deleted}` |
+| `DELETE /api/todos?completed=true` | yes | — | Clear completed todos, then best-effort delete their image objects | `200 {deleted}` |
 
-Image validation errors surface as `400` via a new `ValidationError` (reusing the existing error class /
-handler). `multer`'s file-size limit returns `400` ("image too large") rather than a generic `500`.
+Image validation errors → `400`. `multer`'s file-size limit → `400` ("image too large"), mapped in the
+error middleware rather than a generic `500`.
 
 ## Backend wiring (`server.js`)
 
-- Construct `const storage = makeStorage()` and pass it into `makeApp(pool, storage)`. `makeApp`'s
-  signature becomes `makeApp(pool, storage = makeStorage())` so tests can inject a fake storage and never
-  touch real S3.
-- Create route: `app.post('/api/todos', requireAuth, upload.single('image'), handler)` where
-  `upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_BYTES } })`.
-  `multer` populates `req.body.title` (multipart) or it comes from `express.json()` (JSON, no file).
-  In the handler: if `req.file`, check `ALLOWED_IMAGE_TYPES.has(req.file.mimetype)` (else `400`), then
-  `const { url, key } = await storage.uploadImage(req.file.buffer, req.file.mimetype)`, then
-  `createTodo(pool, req.userId, title, { imageUrl: url, imageKey: key })`. No file → `createTodo(..., title)`.
-- `DELETE /api/todos/:id`: `const { deleted, imageKey } = await deleteTodo(...)`; if `!deleted` → `404`;
-  else respond `204`, and if `imageKey` is a string, best-effort `storage.deleteImage(imageKey)` (await +
-  try/catch; failure logged, response still `204`).
-- `DELETE /api/todos?completed=true`: `const { count, imageKeys } = await clearCompleted(...)`; respond
-  `{ deleted: count }`; best-effort `storage.deleteImages(imageKeys)` (try/catch + log).
-- Multer errors (e.g. `LIMIT_FILE_SIZE`) handled in the error middleware → `400 { error: 'image too large' }`.
+- `makeApp(pool, storage = makeStorage())` — storage injectable so tests use a fake (no real S3/presign).
+- `const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_BYTES } })`.
+- `const toClient = async (row) => { const { image_key, ...rest } = row; return { ...rest, image_url:
+  image_key ? await storage.presignedGetUrl(image_key) : null } }`. Applied to every row-returning
+  response: `GET /api/todos` (`Promise.all(rows.map(toClient))`), `POST`, and `PATCH`.
+- Create route: `upload.single('image')`; validate `cleanTitle(req.body?.title)` before any upload; if
+  `req.file`, check `ALLOWED_IMAGE_TYPES.has(req.file.mimetype)` (else `400`), then
+  `const { key } = await storage.uploadImage(req.file.buffer, req.file.mimetype)`; `createTodo(pool,
+  userId, title, key)`; respond `await toClient(row)`.
+- Delete routes: as before — `deleteTodo → { deleted, imageKey }` (404 if `!deleted`, else best-effort
+  `deleteImage`); `clearCompleted → { count, imageKeys }` (`{ deleted: count }` + best-effort
+  `deleteImages`).
+- Error middleware: add `if (err?.code === 'LIMIT_FILE_SIZE') return res.status(400)...`.
 
 ## Frontend (vanilla, extends the existing page)
 
-- **`index.html`** — add a file input to the new-todo form:
-  `<input id="new-image" type="file" accept="image/*" />`.
-- **`app.js`**
-  - `api(method, path, body)`: when `body instanceof FormData`, send it as-is (no `JSON.stringify`, no
-    `Content-Type` header — the browser sets the multipart boundary). Otherwise unchanged.
-  - Create submit: if a file is selected, build `FormData` with `title` + `image` and POST it; otherwise
-    POST JSON `{title}` as today. Reset both the text input and the file input afterward.
-  - `renderItem(t)`: when `t.image_url`, render a thumbnail `<img class="thumb" src={t.image_url}
-    loading="lazy" alt="">` inside the item; clicking it opens the full image in a new tab
-    (`<a href={t.image_url} target="_blank" rel="noopener">`). Titles still render via `textContent`.
-- **`public/style.css`** — `.thumb` (small fixed max-height, `object-fit: cover`, rounded corners) and
-  minimal styling for the file input within `.new`.
+- **`index.html`** — add `<input id="new-image" type="file" accept="image/*" />` to the new-todo form.
+- **`app.js`** — `api()` sends a `FormData` body as-is (no `JSON.stringify`, no `Content-Type`); create
+  submit builds `FormData` (title + image) when a file is chosen, else posts JSON; `renderItem` renders
+  `<img class="thumb" src={t.image_url} loading="lazy">` linked to the full image when `t.image_url` is
+  set. Titles still render via `textContent`. (Presigned URLs expire ~1h; a list reload re-signs them —
+  acceptable for this UI.)
+- **`style.css`** — `.thumb` + file-input rules.
 
 ## Error handling
 
-Server: bad title → `400` (`ValidationError`, unchanged); unsupported image type → `400`; image over
-5 MB → `400` (multer limit, mapped in the error middleware); upload/storage failure during create →
-`500` (generic JSON, no credentials leaked) and **no** todo row is created (upload happens before the DB
-insert). Delete-time storage failures are swallowed (logged) so the user-facing delete still succeeds.
-Frontend: upload/validation failures surface on the existing dismissible error line.
+Server: bad title → `400`; unsupported image type → `400`; image over 5 MB → `400` (multer); upload
+failure during create → `500` (generic JSON, no credentials leaked) and **no** todo row created (upload
+precedes the DB insert). Delete-time storage failures are swallowed (logged) so the delete still
+succeeds. A presign failure on read surfaces as `500` (the row exists but its URL couldn't be minted).
+Frontend: failures surface on the existing dismissible error line.
 
 ## Testing
 
-- **`storage.js` unit tests** (no network): `publicUrl(key)` builds the expected URL from a sample
-  `AWS_ENDPOINT_URL_S3`; `contentTypeToExt` maps each allowed type; unsupported types are rejected;
-  `deleteImages([])` is a no-op. The S3 client may be stubbed to assert `PutObject`/`DeleteObject` params
-  (bucket, key, `ContentType`) without a real call.
-- **`db.js` integration tests** (transaction-rollback, existing style): `createTodo` with an image stores
-  and returns `image_url`; without an image both columns are `NULL`; `listTodos` includes `image_url`;
-  `deleteTodo` returns `{ deleted: true, imageKey }` (and `{ deleted: false, ... }` for a
-  missing/other-user row); `clearCompleted` returns `{ count, imageKeys }` with only non-null keys.
-  Existing `deleteTodo`/`clearCompleted` assertions are updated to the new return shapes.
-- **Route test (optional)** — a `makeApp(pool, fakeStorage)` test asserting that `POST /api/todos` with a
-  multipart image calls `fakeStorage.uploadImage` and persists the returned URL, and that delete calls
-  `deleteImage`. Requires adding `supertest`; deferred unless we decide to add it.
-- **Live smoke** after deploy: create a todo with a JPEG → thumbnail renders from the public URL → the
-  object is reachable via the stored URL; delete the todo → the object 404s afterward.
+- **`storage.js` unit tests** (no network): `uploadImage` sends `PutObject` with the right
+  bucket/key/ContentType and returns a `todos/{uuid}.{ext}` key (injected fake client); `contentTypeToExt`
+  maps allowed types and rejects others; `deleteImage`/`deleteImages` send the right commands and
+  `deleteImages([])` is a no-op; `presignedGetUrl` (real `S3Client`, dummy creds — local signing) returns
+  a URL containing the bucket, key, and `X-Amz-Signature`/`X-Amz-Expires`.
+- **`db.js` integration tests** (transaction-rollback, existing style): `createTodo` with a key stores
+  and returns `image_key`; without a key it is `NULL`; `listTodos` includes `image_key`; `deleteTodo`
+  returns `{ deleted, imageKey }`; `clearCompleted` returns `{ count, imageKeys }` (non-null only).
+- **Route tests** (`supertest`, fake storage injected): `POST` multipart with an image calls
+  `uploadImage` and the response carries the fake presigned `image_url` (and no `image_key`); JSON `POST`
+  without an image → `image_url: null`, no upload; unsupported type / bad title → `400` with no upload;
+  `DELETE` calls `deleteImage`; clear-completed calls `deleteImages`.
+- **Live smoke** after wiring: create a todo with a JPEG → response `image_url` is a presigned URL that
+  `GET`s `200`; delete the todo → the object is gone (the presigned URL then `403/404`).
 
 ## Delivery
 
-Follows the established Firth-branch + git-branch flow (see the multi-tenant spec's Delivery section):
-work on a Firth branch (isolated DB + compute), apply `003_todo_images.sql` to the branch DB, verify the
-public-bucket upload/serve path end-to-end on the branch URL (including the public-URL-format check),
-then merge code + migration to `main`, re-run the migration against `main`'s DB, rebuild, and deploy.
-
-**Pre-flight (implementation step):** confirm `BUCKET_NAME` is a public bucket
-(`npx @insforge/cli storage buckets`); if it is private, make/use a public bucket. Confirm the public
-object URL format with a real `PutObject` + public `curl GET` before wiring the frontend.
+Migration `003` is additive and applied to the active DB. To ship, follow the project's established build
++ `firth deploy` flow (see the multi-tenant plan's deploy/promote tasks). No bucket visibility change is
+needed (the bucket stays private). If shipping via a Firth branch, `firth secrets` refreshes `./.env`
+(branch DB + storage creds), apply `003` to the branch DB, verify the presigned read path there, then
+merge code + migration to `main` and re-run `003` against main's DB before deploying.
 
 ## Security notes
 
-- **Public images (accepted trade-off):** objects are world-readable by URL; the random-UUID key is the
-  only obscurity. No per-user authorization on image reads. Acceptable per the chosen approach; revisit
-  with backend byte-proxying + a private bucket if image privacy is later required.
-- **Credentials stay server-side:** S3 access keys are project-admin and never reach the browser; the
-  browser only ever sees the public object URL.
-- **Upload validation:** content type allow-list + 5 MB cap bound abuse; keys are server-generated UUIDs
-  (no client-controlled paths → no path traversal in the object key).
-- **Unchanged guarantees:** todo titles still render via `textContent` (XSS-safe); all SQL parameterized;
-  todo rows remain owner-scoped (`where ... user_id`).
+- **Private images:** the bucket stays private; images are reached only via per-object presigned GET URLs
+  that expire (default 1h) and are unguessable. No bucket-wide exposure; no permanently public objects.
+- **Credentials stay server-side:** S3 access keys never reach the browser; the browser only ever sees a
+  short-lived presigned URL.
+- **Upload validation:** content-type allow-list + 5 MB cap bound abuse; keys are server-generated UUIDs
+  (no client-controlled object paths → no path traversal).
+- **Unchanged guarantees:** todo titles render via `textContent` (XSS-safe); all SQL parameterized; todo
+  rows stay owner-scoped (`where ... user_id`). `image_key` is never exposed to clients.

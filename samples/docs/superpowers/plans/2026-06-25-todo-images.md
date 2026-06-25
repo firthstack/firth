@@ -2,88 +2,90 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let a user attach one optional image to a todo at creation time; the image is stored in the public InsForge S3 bucket and shown as a thumbnail.
+**Goal:** Let a user attach one optional image to a todo at creation time; the image lives in the private Tigris bucket and is shown via a short-lived presigned URL.
 
-**Architecture:** The Express backend receives the new todo as `multipart/form-data` (title + optional image), uploads the image to the public bucket through the S3 gateway (`@aws-sdk/client-s3`), and stores `image_url` + `image_key` on the `todos` row. The frontend renders `t.image_url` with a plain `<img>`. Deleting a todo best-effort deletes its storage object.
+**Architecture:** The Express backend receives the new todo as `multipart/form-data` (title + optional image), uploads the image to the private Tigris bucket through `@aws-sdk/client-s3` (`PutObject`), and stores only `image_key` on the `todos` row. On every todo read the backend mints a presigned GET URL (`@aws-sdk/s3-request-presigner`) and returns it as `image_url`; `image_key` is never sent to clients. Deleting a todo best-effort deletes its storage object.
 
-**Tech Stack:** Node ESM, Express 4, `pg`, `@aws-sdk/client-s3`, `multer`, `supertest` (dev), vanilla JS frontend, `node:test`.
+**Tech Stack:** Node ESM, Express 4, `pg`, `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`, `multer`, `supertest` (dev), vanilla JS frontend, `node:test`.
 
-**Spec:** [`docs/superpowers/specs/2026-06-25-todo-images-design.md`](../specs/2026-06-25-todo-images-design.md)
+**Spec:** [`docs/superpowers/specs/2026-06-25-todo-images-design.md`](../specs/2026-06-25-todo-images-design.md) (see its Revision History — this plan implements the revised presigned-URL design)
 
 ## Global Constraints
 
 - **One optional image per todo, set only at creation** (`POST /api/todos`). Never edited/replaced after; deleting the todo deletes its image.
-- **Approach B — public bucket + public URL.** Store `image_url` (display) + `image_key` (delete). `image_key` is server-internal and never returned to clients.
-- **Upload to storage via the S3 gateway** using the app's existing `.env` vars (`AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `BUCKET_NAME`). **`forcePathStyle: true` is required.** No new secrets.
+- **Private bucket + presigned GET URLs.** Store only `image_key`. On every read, the server mints a presigned `image_url` (default TTL 3600s). The bucket is never made public.
+- **`image_key` is server-internal — never returned to clients.** Clients only see the presigned `image_url` (or `null`).
+- **Storage backend is Tigris**, reached via the S3 protocol using the app's existing `.env` vars (`AWS_ENDPOINT_URL_S3` ≈ `https://t3.storage.dev`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `BUCKET_NAME`). **`forcePathStyle: true` is required.** No new secrets.
 - **Object key:** `todos/{uuid}.{ext}` (random UUID; `{ext}` from validated content type).
-- **Allowed content types:** `image/jpeg`, `image/png`, `image/webp`, `image/gif`. **Max size: 5 MB** (5 * 1024 * 1024 bytes).
-- **Delete is best-effort:** DB row removed first; a storage-delete failure is logged, not surfaced (orphaned objects acceptable).
-- **Data-layer return shapes (changed):** `deleteTodo → { deleted: boolean, imageKey: string | null }`; `clearCompleted → { count: number, imageKeys: string[] }` (only non-null keys).
-- **Migration `003` is purely additive** (two nullable columns) and idempotent (`if not exists`) — safe to run on any DB.
+- **Allowed content types:** `image/jpeg`, `image/png`, `image/webp`, `image/gif`. **Max size: 5 MB** (`MAX_IMAGE_BYTES = 5 * 1024 * 1024`). Default presigned TTL `IMAGE_URL_TTL_SECONDS = 3600`.
+- **Delete is best-effort:** DB row removed first; a storage-delete failure is logged, not surfaced.
+- **Data-layer return shapes:** `deleteTodo → { deleted: boolean, imageKey: string | null }`; `clearCompleted → { count: number, imageKeys: string[] }` (only non-null keys).
+- **Migration `003` is purely additive** (one nullable column `image_key`) and idempotent (`if not exists`).
+- **Stay on `@aws-sdk/*`** (not the Tigris-native SDK) to avoid re-plumbing.
 - **Unchanged guarantees:** titles render via `textContent` (XSS-safe); all SQL parameterized; todo rows stay owner-scoped.
-- **Test command:** from `samples/todo/`, `node --env-file=../.env --test` (a single file: `node --env-file=../.env --test test/<file>.test.js`). `DATABASE_URL` and the `AWS_*` vars come from `samples/.env`.
+- **Test command:** from `samples/todo/`, `node --env-file=../.env --test` (single file: `... --test test/<file>.test.js`). `DATABASE_URL` + `AWS_*` come from `samples/.env`.
 
 ---
 
 ## File Structure
 
-- **Create** `todo/storage.js` — S3 wrapper: upload/delete + pure helpers (key gen, public-URL build, content-type→ext). Single responsibility, client injectable for tests.
-- **Create** `todo/test/storage.test.js` — unit tests for `storage.js` (injected fake S3 client; no network).
-- **Create** `migrations/003_todo_images.sql` — adds `image_url`, `image_key` to `todos`.
-- **Create** `todo/test/routes.test.js` — HTTP route tests via `supertest` + a fake storage (real DB, rolled-back tx).
+- **Create/Revise** `todo/storage.js` — S3 wrapper: `uploadImage` (→`{key}`), `presignedGetUrl`, `deleteImage`, `deleteImages`, `contentTypeToExt`, constants. Injectable client for upload/delete tests.
+- **Create/Revise** `todo/test/storage.test.js` — unit tests (injected fake client for upload/delete; real client + dummy creds for `presignedGetUrl`; no network).
+- **Create** `migrations/003_todo_images.sql` — adds `image_key` to `todos`.
+- **Create** `todo/test/routes.test.js` — HTTP route tests via `supertest` + fake storage (real DB, rolled-back tx).
 - **Modify** `todo/db.js` — `COLS`, `createTodo`, `deleteTodo`, `clearCompleted`; export `cleanTitle`.
-- **Modify** `todo/server.js` — `multer`, `makeApp(pool, storage)`, create/delete route wiring, multer error mapping.
-- **Modify** `todo/test/todos.test.js` — add image-column tests; update the changed `deleteTodo`/`clearCompleted` assertions.
+- **Modify** `todo/server.js` — `multer`, injectable storage, `toClient` presign helper on every row-returning route, create/delete wiring, multer error mapping.
+- **Modify** `todo/test/todos.test.js` — add image-column tests; update the 3 changed `deleteTodo`/`clearCompleted` assertions.
 - **Modify** `todo/public/index.html` — file input in the new-todo form.
-- **Modify** `todo/public/app.js` — `FormData` support in `api()`; image in create submit; thumbnail in `renderItem`.
+- **Modify** `todo/public/app.js` — `FormData` in `api()`; image in create submit; thumbnail in `renderItem`.
 - **Modify** `todo/public/style.css` — `.thumb` + file-input styling.
-- **Modify** `todo/package.json` — add `@aws-sdk/client-s3`, `multer`, `supertest`.
+- **Modify** `todo/package.json` — add `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`, `multer`, `supertest`.
 
 ---
 
 ## Task 1: Storage module (`todo/storage.js`)
 
+> Revised for the Tigris/presigned design. (An earlier commit `27fff66` built a public-URL variant; this task brings `storage.js` + its tests to the presigned-URL version.)
+
 **Files:**
-- Create: `todo/storage.js`
-- Create: `todo/test/storage.test.js`
-- Modify: `todo/package.json` (add `@aws-sdk/client-s3`)
+- Create/Revise: `todo/storage.js`
+- Create/Revise: `todo/test/storage.test.js`
+- Modify: `todo/package.json` (add `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner`)
 
 **Interfaces:**
 - Produces:
-  - `makeStorage(env = process.env, client?) → { uploadImage(buffer, contentType) → Promise<{key,url}>, deleteImage(key) → Promise<void>, deleteImages(keys) → Promise<void>, publicUrl(key) → string }`
+  - `makeStorage(env = process.env, client?) → { uploadImage(buffer, contentType) → Promise<{key}>, presignedGetUrl(key, expiresIn?) → Promise<string>, deleteImage(key) → Promise<void>, deleteImages(keys) → Promise<void> }`
   - `contentTypeToExt(type) → string` (throws on unsupported)
-  - `publicBaseFromEndpoint(endpoint) → string`
-  - `ALLOWED_IMAGE_TYPES: Set<string>`, `MAX_IMAGE_BYTES: number`
+  - `ALLOWED_IMAGE_TYPES: Set<string>`, `MAX_IMAGE_BYTES: number`, `IMAGE_URL_TTL_SECONDS: number`
 - Consumes: nothing from other tasks.
 
-- [ ] **Step 1: Install the AWS S3 client**
+- [ ] **Step 1: Install the AWS S3 client + presigner**
 
-Run from `samples/todo/`:
 ```bash
-cd /Users/junwen/Work/Personal/firth/samples/todo
-npm install @aws-sdk/client-s3
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner'
 ```
-Expected: `package.json` gains `@aws-sdk/client-s3` under dependencies; `npm` exits 0.
+Expected: both packages in `package.json` dependencies; `npm` exits 0. (`@aws-sdk/client-s3` may already be present from the earlier commit — that's fine.)
 
-- [ ] **Step 2: Write the failing tests** — create `todo/test/storage.test.js`
+- [ ] **Step 2: Write the test file** — replace `todo/test/storage.test.js` with exactly:
 
 ```javascript
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  makeStorage, contentTypeToExt, publicBaseFromEndpoint,
-  ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES,
+  makeStorage, contentTypeToExt,
+  ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, IMAGE_URL_TTL_SECONDS,
 } from '../storage.js'
 
 const ENV = {
-  AWS_ENDPOINT_URL_S3: 'https://app.us-east.insforge.app/storage/v1/s3',
-  AWS_REGION: 'us-east-2',
-  AWS_ACCESS_KEY_ID: 'x',
-  AWS_SECRET_ACCESS_KEY: 'y',
+  AWS_ENDPOINT_URL_S3: 'https://t3.storage.dev',
+  AWS_REGION: 'auto',
+  AWS_ACCESS_KEY_ID: 'tid_test',
+  AWS_SECRET_ACCESS_KEY: 'tsec_test',
   BUCKET_NAME: 'mybucket',
 }
 
 // A fake S3 client: records every command's `.input` instead of hitting the network.
+// Used for the send-based ops (upload/delete). presignedGetUrl needs a real client (local signing).
 function fakeClient() {
   const sent = []
   return { sent, async send(cmd) { sent.push(cmd); return {} } }
@@ -91,19 +93,9 @@ function fakeClient() {
 
 test('constants', () => {
   assert.equal(MAX_IMAGE_BYTES, 5 * 1024 * 1024)
+  assert.equal(IMAGE_URL_TTL_SECONDS, 3600)
   assert.ok(ALLOWED_IMAGE_TYPES.has('image/jpeg'))
   assert.ok(!ALLOWED_IMAGE_TYPES.has('text/plain'))
-})
-
-test('publicBaseFromEndpoint strips the /storage/v1/s3 suffix', () => {
-  assert.equal(
-    publicBaseFromEndpoint('https://app.us-east.insforge.app/storage/v1/s3'),
-    'https://app.us-east.insforge.app',
-  )
-  assert.equal(
-    publicBaseFromEndpoint('https://app.us-east.insforge.app/storage/v1/s3/'),
-    'https://app.us-east.insforge.app',
-  )
 })
 
 test('contentTypeToExt maps allowed types and rejects others', () => {
@@ -114,20 +106,11 @@ test('contentTypeToExt maps allowed types and rejects others', () => {
   assert.throws(() => contentTypeToExt('text/plain'))
 })
 
-test('publicUrl builds the public object URL', () => {
-  const s = makeStorage(ENV, fakeClient())
-  assert.equal(
-    s.publicUrl('todos/abc.jpg'),
-    'https://app.us-east.insforge.app/api/storage/buckets/mybucket/objects/todos/abc.jpg',
-  )
-})
-
-test('uploadImage sends PutObject with the right params and returns key+url', async () => {
+test('uploadImage sends PutObject with the right params and returns a key', async () => {
   const client = fakeClient()
   const s = makeStorage(ENV, client)
-  const { key, url } = await s.uploadImage(Buffer.from('data'), 'image/png')
+  const { key } = await s.uploadImage(Buffer.from('data'), 'image/png')
   assert.match(key, /^todos\/[0-9a-f-]+\.png$/)
-  assert.equal(url, s.publicUrl(key))
   assert.equal(client.sent.length, 1)
   const input = client.sent[0].input
   assert.equal(input.Bucket, 'mybucket')
@@ -157,28 +140,41 @@ test('deleteImages sends one DeleteObjects with all keys', async () => {
   const s = makeStorage(ENV, client)
   await s.deleteImages(['todos/a.jpg', 'todos/b.png'])
   assert.equal(client.sent.length, 1)
+  assert.equal(client.sent[0].input.Bucket, 'mybucket')
   assert.deepEqual(
     client.sent[0].input.Delete.Objects,
     [{ Key: 'todos/a.jpg' }, { Key: 'todos/b.png' }],
   )
 })
+
+test('presignedGetUrl returns a locally-signed URL for the object (no network)', async () => {
+  const s = makeStorage(ENV) // real S3Client; getSignedUrl signs locally using the dummy creds
+  const url = await s.presignedGetUrl('todos/x.jpg')
+  assert.match(url, /^https:\/\/t3\.storage\.dev\/mybucket\/todos\/x\.jpg\?/)
+  assert.match(url, /X-Amz-Signature=/)
+  assert.match(url, /X-Amz-Expires=3600/)
+})
 ```
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `node --env-file=../.env --test test/storage.test.js`
-Expected: FAIL — cannot find module `../storage.js`.
+```bash
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env --test test/storage.test.js'
+```
+Expected: FAIL — `presignedGetUrl`/`IMAGE_URL_TTL_SECONDS` missing (or, if `storage.js` doesn't exist yet, module-not-found). The `presignedGetUrl` and `uploadImage` (returns `{key}` not `{key,url}`) tests must fail against the old version.
 
-- [ ] **Step 4: Implement `todo/storage.js`**
+- [ ] **Step 4: Write `todo/storage.js`** — replace its entire contents with exactly:
 
 ```javascript
 import {
-  S3Client, PutObjectCommand, DeleteObjectCommand, DeleteObjectsCommand,
+  S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, DeleteObjectsCommand,
 } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'node:crypto'
 
 export const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+export const IMAGE_URL_TTL_SECONDS = 3600
 
 const EXT_BY_TYPE = {
   'image/jpeg': 'jpg',
@@ -193,14 +189,8 @@ export function contentTypeToExt(type) {
   return ext
 }
 
-// The S3 gateway endpoint is `<host>/storage/v1/s3`; public objects are served off the host root.
-export function publicBaseFromEndpoint(endpoint) {
-  return String(endpoint ?? '').replace(/\/storage\/v1\/s3\/?$/, '').replace(/\/$/, '')
-}
-
 export function makeStorage(env = process.env, client) {
   const bucket = env.BUCKET_NAME
-  const base = publicBaseFromEndpoint(env.AWS_ENDPOINT_URL_S3)
   const s3 = client ?? new S3Client({
     endpoint: env.AWS_ENDPOINT_URL_S3,
     region: env.AWS_REGION,
@@ -211,17 +201,17 @@ export function makeStorage(env = process.env, client) {
     },
   })
 
-  // NOTE: this URL shape is verified live in Task 2; adjust here + the publicUrl test if it differs.
-  const publicUrl = (key) => `${base}/api/storage/buckets/${bucket}/objects/${key}`
-
   return {
-    publicUrl,
     async uploadImage(buffer, contentType) {
       const key = `todos/${randomUUID()}.${contentTypeToExt(contentType)}`
       await s3.send(new PutObjectCommand({
         Bucket: bucket, Key: key, Body: buffer, ContentType: contentType,
       }))
-      return { key, url: publicUrl(key) }
+      return { key }
+    },
+    // Short-lived presigned GET URL — the only way the (private) object is reached. Local crypto.
+    async presignedGetUrl(key, expiresIn = IMAGE_URL_TTL_SECONDS) {
+      return getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: key }), { expiresIn })
     },
     async deleteImage(key) {
       await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
@@ -238,83 +228,54 @@ export function makeStorage(env = process.env, client) {
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `node --env-file=../.env --test test/storage.test.js`
-Expected: PASS (8 tests).
+```bash
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env --test test/storage.test.js'
+```
+Expected: PASS (7 tests, output pristine). If the `presignedGetUrl` URL assertion fails on host/path ordering, inspect the actual URL printed by a quick `node --env-file=../.env -e "import('./storage.js').then(async({makeStorage})=>console.log(await makeStorage().presignedGetUrl('todos/x.jpg')))"` and adjust ONLY the regex in that one test to match the real path-style shape (still asserting bucket, key, `X-Amz-Signature`, `X-Amz-Expires=3600`).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/junwen/Work/Personal/firth/samples
-git add todo/storage.js todo/test/storage.test.js todo/package.json todo/package-lock.json
-git commit -m "feat(todo): storage module for S3 image upload/delete
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples && git add todo/storage.js todo/test/storage.test.js todo/package.json todo/package-lock.json && git commit -m "feat(todo): Tigris storage module (upload, presigned GET, delete)
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"'
 ```
 
 ---
 
-## Task 2: Verify the public object URL format against live storage
+## Task 2: Verify the presigned GET path works live against Tigris
 
-This locks the one unknown in `storage.js` (`publicUrl`) before anything depends on it. It needs Task 1's dependency installed and network access to the project's InsForge storage.
+Confirms a real upload + presigned GET round-trips against the project's private Tigris bucket. Needs Task 1's deps and network access.
 
-**Files:**
-- Modify (only if the live check disagrees): `todo/storage.js` (`publicUrl`), `todo/test/storage.test.js` (the `publicUrl` expectation)
+**Files:** none (verification only; no commit unless a code fix is needed).
 
-**Interfaces:**
-- Consumes: `makeStorage` (Task 1).
-- Produces: a confirmed-correct `publicUrl` format + a public bucket.
+**Interfaces:** Consumes `makeStorage` (Task 1).
 
-- [ ] **Step 1: Upload a probe object and print the guessed public URL**
+- [ ] **Step 1: Upload a probe object, presign it, and fetch it**
 
-Run from `samples/todo/`:
 ```bash
-node --env-file=../.env -e "import('./storage.js').then(async ({ makeStorage }) => { const s = makeStorage(); const { key, url } = await s.uploadImage(Buffer.from([0xff,0xd8,0xff,0xd9]), 'image/jpeg'); console.log('KEY=' + key); console.log('URL=' + url); })"
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env -e "import(\"./storage.js\").then(async ({ makeStorage }) => { const s = makeStorage(); const { key } = await s.uploadImage(Buffer.from([0xff,0xd8,0xff,0xd9]), \"image/jpeg\"); const url = await s.presignedGetUrl(key); console.log(\"KEY=\"+key); console.log(\"URL=\"+url); })"'
 ```
-Expected: prints `KEY=todos/<uuid>.jpg` and `URL=<guessed public url>`. (If this errors with credentials/endpoint, fix the `.env` via `firth secrets` first.)
+Expected: prints `KEY=todos/<uuid>.jpg` and a long `URL=...?X-Amz-...`.
 
-- [ ] **Step 2: Check whether the guessed URL serves the object**
+- [ ] **Step 2: Confirm the presigned URL serves the object (200)**
 
-Run (substitute the printed `URL=`):
 ```bash
 curl -sS -o /dev/null -w "%{http_code}\n" "<URL from step 1>"
 ```
-Expected: `200`.
+Expected: `200`. (If `403`: signing/clock/region issue — print the SDK error and report; do not work around it.)
 
-- [ ] **Step 3: If not 200, find the working format and update the code**
-
-If `403`: the bucket is likely private — make `BUCKET_NAME` public (InsForge Dashboard → Storage → bucket → set public, or recreate it public) and re-run Step 2.
-If `404`: try these candidate shapes against the same `KEY` until one returns `200`:
-```bash
-BASE="https://<app-key>.<region>.insforge.app"   # AWS_ENDPOINT_URL_S3 minus /storage/v1/s3
-KEY="todos/<uuid>.jpg"
-BUCKET="<BUCKET_NAME>"
-for u in \
-  "$BASE/api/storage/buckets/$BUCKET/objects/$KEY" \
-  "$BASE/storage/v1/object/public/$BUCKET/$KEY" \
-  "$BASE/storage/v1/buckets/$BUCKET/objects/$KEY" ; do
-  printf '%s -> ' "$u"; curl -sS -o /dev/null -w "%{http_code}\n" "$u"
-done
-```
-Then set `publicUrl` in `todo/storage.js` to the winning shape and update the `publicUrl` test expectation in `todo/test/storage.test.js` to match. Re-run `node --env-file=../.env --test test/storage.test.js` → PASS.
-
-- [ ] **Step 4: Delete the probe object**
-
-Run (substitute `KEY` from Step 1):
-```bash
-node --env-file=../.env -e "import('./storage.js').then(async ({ makeStorage }) => { await makeStorage().deleteImage('<KEY from step 1>'); console.log('probe deleted'); })"
-```
-Expected: `probe deleted`.
-
-- [ ] **Step 5: Commit (only if the format changed)**
+- [ ] **Step 3: Delete the probe object and confirm the URL then 404s**
 
 ```bash
-cd /Users/junwen/Work/Personal/firth/samples
-git add todo/storage.js todo/test/storage.test.js
-git commit -m "fix(todo): lock verified public object URL format
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env -e "import(\"./storage.js\").then(async ({ makeStorage }) => { await makeStorage().deleteImage(\"<KEY from step 1>\"); console.log(\"probe deleted\"); })"'
+curl -sS -o /dev/null -w "%{http_code}\n" "<URL from step 1>"   # expect 403 or 404 (object gone)
 ```
-If nothing changed, skip the commit and note "public URL format confirmed as the default shape."
+Expected: `probe deleted`, then `403`/`404`.
+
+- [ ] **Step 4: Record the result in the report**
+
+No code change expected. If Step 2 was not `200`, capture the exact error/status and STOP (report to controller) — the presigned read path is load-bearing for the whole feature.
 
 ---
 
@@ -322,13 +283,13 @@ If nothing changed, skip the commit and note "public URL format confirmed as the
 
 **Files:**
 - Create: `migrations/003_todo_images.sql`
-- Modify: `todo/db.js` (`COLS` line 4; `createTodo` ~lines 107-114; `deleteTodo` ~lines 135-141; `clearCompleted` ~lines 143-149; export `cleanTitle`)
+- Modify: `todo/db.js` (`COLS` line 4; `createTodo` ~lines 107-114; `deleteTodo` ~lines 135-141; `clearCompleted` ~lines 143-149; export `cleanTitle` line 24)
 - Modify: `todo/test/todos.test.js` (add tests; update 3 existing assertions)
 
 **Interfaces:**
-- Consumes: existing `db.js` (`makePool`, `createTodo`, `updateTodo`, `listTodos`, `createUser`).
+- Consumes: existing `db.js` (`makePool`, `listTodos`, `updateTodo`, `createUser`).
 - Produces:
-  - `createTodo(db, userId, title, image?) → row` where `image` is `{ imageUrl, imageKey }` (optional). Row includes `image_url`, not `image_key`.
+  - `createTodo(db, userId, title, imageKey?) → row` — row includes `image_key`.
   - `deleteTodo(db, userId, id) → { deleted: boolean, imageKey: string | null }`
   - `clearCompleted(db, userId) → { count: number, imageKeys: string[] }`
   - `cleanTitle(title) → string` (now exported; throws `ValidationError`)
@@ -336,46 +297,40 @@ If nothing changed, skip the commit and note "public URL format confirmed as the
 - [ ] **Step 1: Create `migrations/003_todo_images.sql`**
 
 ```sql
--- 003_todo_images.sql — one optional image per todo (public-bucket URL + storage key).
--- Additive and idempotent: two nullable columns; existing rows are unaffected.
-alter table todos add column if not exists image_url text;
+-- 003_todo_images.sql — one optional image per todo (Tigris storage object key).
+-- Additive and idempotent: a single nullable column; existing rows are unaffected.
 alter table todos add column if not exists image_key text;
 ```
 
 - [ ] **Step 2: Apply the migration to the active DB**
 
-Run from `samples/`:
 ```bash
-cd /Users/junwen/Work/Personal/firth/samples
-export DATABASE_URL="$(grep '^DATABASE_URL=' ./.env | cut -d= -f2-)"
-psql "$DATABASE_URL" -f migrations/003_todo_images.sql
-psql "$DATABASE_URL" -c '\d todos'
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples && export DATABASE_URL="$(grep "^DATABASE_URL=" ./.env | cut -d= -f2-)" && psql "$DATABASE_URL" -f migrations/003_todo_images.sql && psql "$DATABASE_URL" -c "\d todos"'
 ```
-Expected: `ALTER TABLE` (x2); `\d todos` lists `image_url | text` and `image_key | text`.
+Expected: `ALTER TABLE`; `\d todos` lists `image_key | text`.
 
-- [ ] **Step 3: Write the failing data-layer tests** — append to `todo/test/todos.test.js`
+- [ ] **Step 3: Write the failing data-layer tests** — append to `todo/test/todos.test.js`:
 
 ```javascript
 // --- todos: images ---
-test('createTodo with an image stores image_url and hides image_key from clients', async () => {
-  const t = await createTodo(client, userA.id, 'pic', { imageUrl: 'https://x/y.jpg', imageKey: 'todos/y.jpg' })
-  assert.equal(t.image_url, 'https://x/y.jpg')
-  assert.equal(t.image_key, undefined) // image_key is server-internal, not in COLS
+test('createTodo with an image key stores and returns image_key', async () => {
+  const t = await createTodo(client, userA.id, 'pic', 'todos/y.jpg')
+  assert.equal(t.image_key, 'todos/y.jpg')
 })
 
-test('createTodo without an image leaves image_url null', async () => {
+test('createTodo without an image key leaves image_key null', async () => {
   const t = await createTodo(client, userA.id, 'nopic')
-  assert.equal(t.image_url, null)
+  assert.equal(t.image_key, null)
 })
 
-test('listTodos includes image_url', async () => {
-  await createTodo(client, userA.id, 'pic', { imageUrl: 'https://x/y.jpg', imageKey: 'todos/y.jpg' })
+test('listTodos includes image_key', async () => {
+  await createTodo(client, userA.id, 'pic', 'todos/y.jpg')
   const [row] = await listTodos(client, userA.id)
-  assert.equal(row.image_url, 'https://x/y.jpg')
+  assert.equal(row.image_key, 'todos/y.jpg')
 })
 
 test('deleteTodo returns { deleted, imageKey } for an owned row', async () => {
-  const t = await createTodo(client, userA.id, 'pic', { imageUrl: 'u', imageKey: 'todos/y.jpg' })
+  const t = await createTodo(client, userA.id, 'pic', 'todos/y.jpg')
   assert.deepEqual(await deleteTodo(client, userA.id, t.id), { deleted: true, imageKey: 'todos/y.jpg' })
 })
 
@@ -385,7 +340,7 @@ test('deleteTodo returns deleted:true, imageKey:null for an owned row with no im
 })
 
 test('clearCompleted returns { count, imageKeys } with only non-null keys', async () => {
-  const a1 = await createTodo(client, userA.id, 'withpic', { imageUrl: 'u', imageKey: 'todos/k1.jpg' })
+  const a1 = await createTodo(client, userA.id, 'withpic', 'todos/k1.jpg')
   const a2 = await createTodo(client, userA.id, 'nopic')
   await updateTodo(client, userA.id, a1.id, { completed: true })
   await updateTodo(client, userA.id, a2.id, { completed: true })
@@ -395,7 +350,7 @@ test('clearCompleted returns { count, imageKeys } with only non-null keys', asyn
 })
 ```
 
-- [ ] **Step 4: Update the 3 existing assertions that change shape** — in `todo/test/todos.test.js`
+- [ ] **Step 4: Update the 3 existing assertions that change shape** — in `todo/test/todos.test.js`:
 
 In `test('deleteTodo returns false for another user\'s todo and leaves it intact', ...)` replace:
 ```javascript
@@ -426,14 +381,16 @@ with:
 
 - [ ] **Step 5: Run the tests to verify the new/changed ones fail**
 
-Run: `node --env-file=../.env --test test/todos.test.js`
-Expected: FAIL — `createTodo` ignores the 4th arg (image_url null), `deleteTodo`/`clearCompleted` return the old types.
+```bash
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env --test test/todos.test.js'
+```
+Expected: FAIL — `createTodo` ignores the 4th arg; `deleteTodo`/`clearCompleted` return old types.
 
 - [ ] **Step 6: Update `todo/db.js`**
 
-Change `COLS` (line 4) to include `image_url` (but NOT `image_key`):
+Change `COLS` (line 4) to include `image_key`:
 ```javascript
-const COLS = 'id, title, completed, image_url, created_at, updated_at'
+const COLS = 'id, title, completed, image_key, created_at, updated_at'
 ```
 
 Export `cleanTitle` — change its declaration (line 24) from `function cleanTitle(title) {` to:
@@ -443,12 +400,11 @@ export function cleanTitle(title) {
 
 Replace `createTodo` (lines ~107-114) with:
 ```javascript
-export async function createTodo(db, userId, title, image) {
+export async function createTodo(db, userId, title, imageKey) {
   const t = cleanTitle(title)
   const { rows } = await db.query(
-    `insert into todos (user_id, title, image_url, image_key)
-     values ($1, $2, $3, $4) returning ${COLS}`,
-    [userId, t, image?.imageUrl ?? null, image?.imageKey ?? null],
+    `insert into todos (user_id, title, image_key) values ($1, $2, $3) returning ${COLS}`,
+    [userId, t, imageKey ?? null],
   )
   return rows[0]
 }
@@ -479,17 +435,17 @@ export async function clearCompleted(db, userId) {
 
 - [ ] **Step 7: Run the tests to verify they pass**
 
-Run: `node --env-file=../.env --test test/todos.test.js`
-Expected: PASS (all — original tests plus the 6 new image tests).
+```bash
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env --test test/todos.test.js'
+```
+Expected: PASS (original tests + the 6 new image tests).
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /Users/junwen/Work/Personal/firth/samples
-git add migrations/003_todo_images.sql todo/db.js todo/test/todos.test.js
-git commit -m "feat(todo): image columns + data-layer image support
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples && git add migrations/003_todo_images.sql todo/db.js todo/test/todos.test.js && git commit -m "feat(todo): image_key column + data-layer image support
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"'
 ```
 
 ---
@@ -497,24 +453,22 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ## Task 4: Server wiring (`server.js`) + route tests
 
 **Files:**
-- Modify: `todo/server.js` (imports; `makeApp` signature; `POST /api/todos`; both DELETE routes; error middleware)
+- Modify: `todo/server.js` (imports; `makeApp` signature; `toClient` helper; `GET`, `POST`, `PATCH`, both `DELETE` routes; error middleware)
 - Create: `todo/test/routes.test.js`
 - Modify: `todo/package.json` (add `multer`, `supertest`)
 
 **Interfaces:**
-- Consumes: `makeStorage` (Task 1), `cleanTitle`/`createTodo`/`deleteTodo`/`clearCompleted` (Task 3), existing auth helpers.
-- Produces: `makeApp(pool, storage = makeStorage())` — storage injectable for tests.
+- Consumes: `makeStorage` (Task 1), `cleanTitle`/`createTodo`/`deleteTodo`/`clearCompleted`/`listTodos`/`updateTodo` (Task 3 + existing), existing auth helpers.
+- Produces: `makeApp(pool, storage = makeStorage())` — storage injectable for tests; all row-returning responses carry a presigned `image_url` and no `image_key`.
 
 - [ ] **Step 1: Install multer + supertest**
 
 ```bash
-cd /Users/junwen/Work/Personal/firth/samples/todo
-npm install multer
-npm install --save-dev supertest
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && npm install multer && npm install --save-dev supertest'
 ```
 Expected: `multer` in dependencies, `supertest` in devDependencies; `npm` exits 0.
 
-- [ ] **Step 2: Write the failing route tests** — create `todo/test/routes.test.js`
+- [ ] **Step 2: Write the failing route tests** — create `todo/test/routes.test.js`:
 
 ```javascript
 import { test, before, after, beforeEach, afterEach } from 'node:test'
@@ -523,18 +477,18 @@ import request from 'supertest'
 import { makeApp } from '../server.js'
 import { makePool, createUser, createSession } from '../db.js'
 
-// Fake storage records calls so we never touch real S3.
+// Fake storage records calls so we never touch real S3/presigning.
 function fakeStorage() {
   const calls = { uploads: [], deletes: [], batchDeletes: [] }
   return {
     calls,
     async uploadImage(buffer, contentType) {
       calls.uploads.push({ size: buffer.length, contentType })
-      return { key: 'todos/fake.jpg', url: 'https://example.test/todos/fake.jpg' }
+      return { key: 'todos/fake.jpg' }
     },
+    async presignedGetUrl(key) { return `https://signed.test/${key}?sig=x` },
     async deleteImage(key) { calls.deletes.push(key) },
     async deleteImages(keys) { calls.batchDeletes.push(keys) },
-    publicUrl: (k) => `https://example.test/${k}`,
   }
 }
 
@@ -559,23 +513,37 @@ afterEach(async () => { await client.query('rollback'); client.release() })
 
 const auth = (r) => r.set('Authorization', `Bearer ${token}`)
 
-test('POST /api/todos with an image uploads and stores image_url', async () => {
+test('POST /api/todos with an image uploads and returns a presigned image_url, no image_key', async () => {
   const res = await auth(request(app).post('/api/todos'))
     .field('title', 'with pic')
     .attach('image', Buffer.from('fakejpegbytes'), { filename: 'p.jpg', contentType: 'image/jpeg' })
   assert.equal(res.status, 201)
   assert.equal(res.body.title, 'with pic')
-  assert.equal(res.body.image_url, 'https://example.test/todos/fake.jpg')
+  assert.equal(res.body.image_url, 'https://signed.test/todos/fake.jpg?sig=x')
   assert.equal(res.body.image_key, undefined)
   assert.equal(fake.calls.uploads.length, 1)
   assert.equal(fake.calls.uploads[0].contentType, 'image/jpeg')
 })
 
-test('POST /api/todos without an image does not call storage', async () => {
+test('POST /api/todos without an image returns image_url null and does not call storage', async () => {
   const res = await auth(request(app).post('/api/todos')).send({ title: 'no pic' })
   assert.equal(res.status, 201)
   assert.equal(res.body.image_url, null)
+  assert.equal(res.body.image_key, undefined)
   assert.equal(fake.calls.uploads.length, 0)
+})
+
+test('GET /api/todos returns a presigned image_url per todo that has an image', async () => {
+  await auth(request(app).post('/api/todos'))
+    .field('title', 'with pic')
+    .attach('image', Buffer.from('x'), { filename: 'p.jpg', contentType: 'image/jpeg' })
+  await auth(request(app).post('/api/todos')).send({ title: 'no pic' })
+  const res = await auth(request(app).get('/api/todos'))
+  assert.equal(res.status, 200)
+  const byTitle = Object.fromEntries(res.body.map((t) => [t.title, t]))
+  assert.equal(byTitle['with pic'].image_url, 'https://signed.test/todos/fake.jpg?sig=x')
+  assert.equal(byTitle['no pic'].image_url, null)
+  assert.ok(res.body.every((t) => t.image_key === undefined))
 })
 
 test('POST /api/todos rejects an unsupported image type (no upload)', async () => {
@@ -617,8 +585,10 @@ test('DELETE /api/todos?completed=true batch-deletes image objects', async () =>
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `node --env-file=../.env --test test/routes.test.js`
-Expected: FAIL — `makeApp` ignores the 2nd (storage) arg; `POST` doesn't parse multipart; image fields absent.
+```bash
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env --test test/routes.test.js'
+```
+Expected: FAIL — `makeApp` ignores the storage arg; `POST` doesn't parse multipart; `image_url`/presigning absent.
 
 - [ ] **Step 4: Update `todo/server.js`**
 
@@ -628,7 +598,7 @@ import multer from 'multer'
 import { makeStorage, ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES } from './storage.js'
 ```
 
-Add `cleanTitle` to the existing `db.js` import list (the destructured import at the top):
+Add `cleanTitle` to the destructured `db.js` import list at the top:
 ```javascript
   makePool, listTodos, createTodo, updateTodo, deleteTodo, clearCompleted, cleanTitle,
 ```
@@ -638,9 +608,25 @@ Change the `makeApp` signature (line 18) to:
 export function makeApp(pool, storage = makeStorage()) {
 ```
 
-Just inside `makeApp`, after `app.use(express.json())`, add the multer instance:
+Just inside `makeApp`, after `app.use(express.json())`, add the multer instance and the client serializer:
 ```javascript
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_BYTES } })
+
+  // Map a db row (carrying internal image_key) to the client shape: a presigned image_url, no image_key.
+  const toClient = async (row) => {
+    const { image_key, ...rest } = row
+    return { ...rest, image_url: image_key ? await storage.presignedGetUrl(image_key) : null }
+  }
+```
+
+Replace the `GET /api/todos` route (lines ~61-63) with:
+```javascript
+  app.get('/api/todos', requireAuth, async (req, res, next) => {
+    try {
+      const rows = await listTodos(pool, req.userId)
+      res.json(await Promise.all(rows.map(toClient)))
+    } catch (e) { next(e) }
+  })
 ```
 
 Replace the `POST /api/todos` route (lines ~65-67) with:
@@ -648,15 +634,31 @@ Replace the `POST /api/todos` route (lines ~65-67) with:
   app.post('/api/todos', requireAuth, upload.single('image'), async (req, res, next) => {
     try {
       const title = cleanTitle(req.body?.title) // validate before any upload → no orphan objects
-      let image
+      let imageKey
       if (req.file) {
         if (!ALLOWED_IMAGE_TYPES.has(req.file.mimetype)) {
           return res.status(400).json({ error: 'unsupported image type' })
         }
-        const { url, key } = await storage.uploadImage(req.file.buffer, req.file.mimetype)
-        image = { imageUrl: url, imageKey: key }
+        const { key } = await storage.uploadImage(req.file.buffer, req.file.mimetype)
+        imageKey = key
       }
-      res.status(201).json(await createTodo(pool, req.userId, title, image))
+      const row = await createTodo(pool, req.userId, title, imageKey)
+      res.status(201).json(await toClient(row))
+    } catch (e) { next(e) }
+  })
+```
+
+Replace the `PATCH /api/todos/:id` route (lines ~69-79) with (same logic, response now via `toClient`):
+```javascript
+  app.patch('/api/todos/:id', requireAuth, async (req, res, next) => {
+    try {
+      if (!UUID_RE.test(req.params.id)) return res.status(404).json({ error: 'not found' })
+      const row = await updateTodo(pool, req.userId, req.params.id, {
+        title: req.body?.title,
+        completed: req.body?.completed,
+      })
+      if (!row) return res.status(404).json({ error: 'not found' })
+      res.json(await toClient(row))
     } catch (e) { next(e) }
   })
 ```
@@ -705,39 +707,40 @@ In the error-handling middleware (lines ~99-104), add a multer size-limit case b
 
 - [ ] **Step 5: Run the route tests to verify they pass**
 
-Run: `node --env-file=../.env --test test/routes.test.js`
-Expected: PASS (6 tests).
+```bash
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env --test test/routes.test.js'
+```
+Expected: PASS (7 tests).
 
 - [ ] **Step 6: Run the full suite to confirm nothing regressed**
 
-Run: `node --env-file=../.env --test`
+```bash
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env --test'
+```
 Expected: PASS (auth + todos + storage + routes).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/junwen/Work/Personal/firth/samples
-git add todo/server.js todo/test/routes.test.js todo/package.json todo/package-lock.json
-git commit -m "feat(todo): multipart create + image upload/cleanup wiring
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples && git add todo/server.js todo/test/routes.test.js todo/package.json todo/package-lock.json && git commit -m "feat(todo): multipart create + presigned image_url serialization
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"'
 ```
 
 ---
 
 ## Task 5: Frontend (file input, FormData, thumbnail)
 
-No automated frontend harness exists in this project, so this task is verified by a manual browser smoke test (Step 5). Keep titles rendered via `textContent`.
+No automated frontend harness exists, so this task is verified by a headless server+curl check (Step 6); the full browser/visual check happens in Task 6 and by the user. Keep titles rendered via `textContent`.
 
 **Files:**
-- Modify: `todo/public/index.html` (new-todo form, ~line 31-34)
-- Modify: `todo/public/app.js` (`api()` ~lines 18-35; create submit ~lines 151-161; `renderItem` ~lines 88-112; add `new-image` element ref ~line 7)
-- Modify: `todo/public/style.css` (add `.thumb` + file-input rules)
+- Modify: `todo/public/index.html` (new-todo form, lines 31-34)
+- Modify: `todo/public/app.js` (element ref line 7; `api()` lines 18-35; create submit lines 151-161; `renderItem` lines 88-112)
+- Modify: `todo/public/style.css` (append `.thumb` + file-input rules)
 
-**Interfaces:**
-- Consumes: the `image_url` field now returned by `GET /api/todos` and `POST /api/todos` (Tasks 3-4).
+**Interfaces:** Consumes the `image_url` field returned by `GET`/`POST`/`PATCH /api/todos` (Task 4).
 
-- [ ] **Step 1: Add the file input** — `todo/public/index.html`, replace the new-todo form (lines 31-34):
+- [ ] **Step 1: Add the file input** — `todo/public/index.html`, replace lines 31-34:
 ```html
       <form id="new-form" class="new">
         <input id="new-input" type="text" placeholder="What needs doing?" autocomplete="off" maxlength="500" />
@@ -746,17 +749,12 @@ No automated frontend harness exists in this project, so this task is verified b
       </form>
 ```
 
-- [ ] **Step 2: Reference the file input** — `todo/public/app.js`, line 7, replace:
+- [ ] **Step 2: Reference the file input** — `todo/public/app.js`, line 7, append after the existing line:
 ```javascript
-const listEl = $('list'), countEl = $('count'), form = $('new-form'), input = $('new-input')
-```
-with:
-```javascript
-const listEl = $('list'), countEl = $('count'), form = $('new-form'), input = $('new-input')
 const fileInput = $('new-image')
 ```
 
-- [ ] **Step 3: Support FormData in `api()`** — `todo/public/app.js`, replace the body of `api` (lines 18-35):
+- [ ] **Step 3: Support FormData in `api()`** — `todo/public/app.js`, replace the `api` function (lines 18-35):
 ```javascript
 async function api(method, pathName, body) {
   const headers = {}
@@ -831,63 +829,53 @@ In `renderItem` (lines 88-112), replace the final `li.append(cb, title, del)` (l
   return li
 ```
 
-- [ ] **Step 5: Add styles** — `todo/public/style.css`, append at the end of the file:
+- [ ] **Step 5: Add styles** — `todo/public/style.css`, append at the end:
 ```css
 .item .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 6px;
   border: 1px solid var(--line); display: block; }
 .new .file { flex: 0 0 auto; padding: 8px 0; border: none; background: none; font-size: 13px; }
 ```
 
-- [ ] **Step 6: Manual browser smoke test**
+- [ ] **Step 6: Headless wiring check**
 
-Start the server (run from `samples/todo/`):
+Start the server, confirm it serves the new markup, then stop it:
 ```bash
-node --env-file=../.env server.js
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && (node --env-file=../.env server.js & echo $! > /tmp/todo-srv.pid; sleep 1; \
+  echo -n "file-input present: "; curl -sS http://localhost:8080/ | grep -c "new-image"; \
+  echo -n "app.js has FormData: "; curl -sS http://localhost:8080/app.js | grep -c "FormData"; \
+  echo -n "healthz: "; curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:8080/healthz; \
+  kill "$(cat /tmp/todo-srv.pid)")'
 ```
-Then in a browser at `http://localhost:8080`:
-1. Register/log in.
-2. Type a title, choose a JPEG/PNG, click **Add** → the item appears with a 40px thumbnail.
-3. Click the thumbnail → the full image opens in a new tab (loads from the public URL).
-4. Add a todo with **no** image → it renders normally (no broken-image icon).
-5. Reload the page → the thumbnail still renders (served from `image_url`).
-6. Delete the todo → it disappears.
-Stop the server with Ctrl-C.
-
-Expected: all six behave as described; no console errors.
+Expected: `file-input present: 1`, `app.js has FormData: 1` (or more), `healthz: 200`. (Full visual thumbnail check is covered in Task 6 / by the user.)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/junwen/Work/Personal/firth/samples
-git add todo/public/index.html todo/public/app.js todo/public/style.css
-git commit -m "feat(todo): attach + show one image per todo in the UI
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples && git add todo/public/index.html todo/public/app.js todo/public/style.css && git commit -m "feat(todo): attach + show one image per todo in the UI
 
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"'
 ```
 
 ---
 
 ## Task 6: End-to-end live verification
 
-Confirms the full path against real storage (not the fake): upload lands in the bucket, the public URL serves it, and deleting the todo removes the object.
+Confirms the full path against real Tigris (not the fake): upload lands, the presigned `image_url` from the API serves the bytes, and deleting the todo removes the object.
 
 **Files:** none (verification only).
 
 - [ ] **Step 1: Start the server**
 
 ```bash
-cd /Users/junwen/Work/Personal/firth/samples/todo
-node --env-file=../.env server.js
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples/todo && node --env-file=../.env server.js > /tmp/todo-e2e.log 2>&1 & echo $! > /tmp/todo-e2e.pid; sleep 1; echo started'
 ```
 
 - [ ] **Step 2: Register, create a todo with an image, capture its `image_url`**
 
-In a second terminal:
 ```bash
 BASE=http://localhost:8080
 TOKEN=$(curl -sS -X POST "$BASE/api/auth/register" -H 'Content-Type: application/json' \
   -d '{"email":"e2e@example.com","password":"password1"}' | node -e "process.stdin.on('data',d=>console.log(JSON.parse(d).token))")
-# tiny valid JPEG (1x1) for the upload
 printf '\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xd9' > /tmp/px.jpg
 CREATED=$(curl -sS -X POST "$BASE/api/todos" -H "Authorization: Bearer $TOKEN" \
   -F 'title=e2e pic' -F 'image=@/tmp/px.jpg;type=image/jpeg')
@@ -895,9 +883,9 @@ echo "$CREATED"
 URL=$(echo "$CREATED" | node -e "process.stdin.on('data',d=>console.log(JSON.parse(d).image_url))")
 ID=$(echo "$CREATED"  | node -e "process.stdin.on('data',d=>console.log(JSON.parse(d).id))")
 ```
-Expected: `CREATED` JSON has a non-null `image_url`; no `image_key` field.
+Expected: `CREATED` JSON has a non-null `image_url` (a `…?X-Amz-…` presigned URL) and no `image_key`.
 
-- [ ] **Step 3: Confirm the image is publicly served, then deleted**
+- [ ] **Step 3: Confirm the presigned URL serves the image, then 404s after delete**
 
 ```bash
 echo -n "before delete: "; curl -sS -o /dev/null -w "%{http_code}\n" "$URL"   # expect 200
@@ -905,39 +893,39 @@ curl -sS -X DELETE "$BASE/api/todos/$ID" -H "Authorization: Bearer $TOKEN" -o /d
 sleep 1
 echo -n "after delete:  "; curl -sS -o /dev/null -w "%{http_code}\n" "$URL"   # expect 403/404
 ```
-Expected: `200` before, `204` on delete, `403`/`404` after. Stop the server (Ctrl-C). If the "before" is not `200`, revisit Task 2 (URL format / bucket visibility).
+Expected: `200` before, `204` on delete, `403`/`404` after. If "before" is not `200`, revisit Task 2.
 
-- [ ] **Step 4: Clean up the e2e account**
+- [ ] **Step 4: Stop the server and clean up**
 
 ```bash
-psql "$(grep '^DATABASE_URL=' /Users/junwen/Work/Personal/firth/samples/.env | cut -d= -f2-)" \
-  -c "delete from users where email = 'e2e@example.com';"
+kill "$(cat /tmp/todo-e2e.pid)" 2>/dev/null
+bash -c 'cd /Users/junwen/Work/Personal/firth/samples && psql "$(grep "^DATABASE_URL=" ./.env | cut -d= -f2-)" -c "delete from users where email = '"'"'e2e@example.com'"'"';"'
 ```
-Expected: `DELETE 1` (cascades to the user's todos/sessions).
+Expected: server stops; `DELETE 1` (cascades to the user's todos/sessions).
 
 ---
 
 ## Delivery (when ready to ship)
 
-Migration `003` is additive and already applied to the active DB (Task 3, Step 2). To ship to the live app, follow the project's established build + `firth deploy` flow (see the multi-tenant plan's deploy/promote tasks): build the image, push the new tag to GHCR, `firth deploy`. If shipping via a Firth branch for isolation, create the branch first (`firth branch create todo-images`), `firth secrets` to refresh `./.env` (new branch DB **and** storage creds), apply `003` to the branch DB, run Tasks 2 + 6 against the branch, then merge the code + migration to `main` and re-run `003` against main's DB before deploying to main.
+Migration `003` is additive and applied to the active DB (Task 3). No bucket-visibility change is needed (the bucket stays private). To ship to the live app, follow the project's established build + `firth deploy` flow (see the multi-tenant plan's deploy/promote tasks). If shipping via a Firth branch, `firth secrets` to refresh `./.env` (branch DB + storage creds), apply `003` to the branch DB, run Tasks 2 + 6 against the branch, then merge code + migration to `main` and re-run `003` against main's DB before deploying.
 
 ---
 
 ## Self-Review
 
 **1. Spec coverage:**
-- One optional image at creation → Task 4 (`POST` multipart, single image, fail-fast title). ✅
-- Public bucket + `image_url`/`image_key`, key internal → Tasks 1, 3 (COLS), 4. ✅
-- S3 gateway via `@aws-sdk/client-s3`, `forcePathStyle`, existing env → Task 1. ✅
-- Key `todos/{uuid}.{ext}`; allowed types; 5 MB → Tasks 1 (gen + constants), 4 (type check + multer limit + error map). ✅
+- One optional image at creation; fail-fast title → Task 4 (`POST` multipart). ✅
+- Private bucket + presigned `image_url`; `image_key` internal/never sent → Tasks 1 (`presignedGetUrl`), 3 (COLS image_key), 4 (`toClient` strips key + signs on GET/POST/PATCH). ✅
+- Tigris via `@aws-sdk/*`, `forcePathStyle`, existing env → Task 1. ✅
+- Key `todos/{uuid}.{ext}`; allowed types; 5 MB; TTL 3600 → Tasks 1 (gen + constants), 4 (type check + multer limit + error map). ✅
 - Best-effort delete on single + clear-completed → Tasks 3 (return keys), 4 (try/catch cleanup). ✅
-- `deleteTodo`/`clearCompleted` new shapes → Task 3 (impl + updated existing tests). ✅
-- Migration `003` additive/idempotent → Task 3. ✅
+- `deleteTodo`/`clearCompleted` shapes → Task 3 (impl + updated existing tests). ✅
+- Migration `003` additive/idempotent (image_key only) → Task 3. ✅
 - `storage.js` module + injectable storage in `makeApp` → Tasks 1, 4. ✅
 - Frontend file input + FormData + thumbnail, `textContent` preserved → Task 5. ✅
-- Tests: storage unit, db integration, route (supertest), live smoke → Tasks 1, 3, 4, 6. ✅
-- Public URL format verification + bucket-public preflight → Task 2. ✅
+- Tests: storage unit (incl. presign), db integration, route (supertest, presigned url asserted), live smoke → Tasks 1, 3, 4, 6. ✅
+- Live presigned read-path verification → Task 2. ✅
 
-**2. Placeholder scan:** No TBD/TODO. The one runtime unknown (public URL shape) is resolved by a concrete verification task (Task 2) with exact probe commands, not left vague.
+**2. Placeholder scan:** No TBD/TODO. Task 2 is concrete probe commands (load-bearing read path), not vague. The one self-adjusting item (presigned-URL regex in the Task 1 test) has explicit fallback instructions and asserts the invariant parts (bucket, key, signature, expiry).
 
-**3. Type consistency:** `makeStorage(env, client)` / `uploadImage→{key,url}` / `deleteImage(key)` / `deleteImages(keys)` used identically across Tasks 1, 4, 6. `createTodo(db,userId,title,image)` with `image={imageUrl,imageKey}` consistent across Tasks 3, 4. `deleteTodo→{deleted,imageKey}` and `clearCompleted→{count,imageKeys}` consistent across Tasks 3, 4. `image_url` (client) vs `image_key` (internal) consistent across Tasks 1, 3, 4, 5.
+**3. Type consistency:** `makeStorage(env, client)`; `uploadImage→{key}`; `presignedGetUrl(key)→string`; `deleteImage(key)`; `deleteImages(keys)` — used identically across Tasks 1, 4, 6 and the fake in Task 4. `createTodo(db,userId,title,imageKey)` consistent across Tasks 3, 4. `deleteTodo→{deleted,imageKey}` / `clearCompleted→{count,imageKeys}` consistent across Tasks 3, 4. `image_key` (db/internal) vs `image_url` (client/presigned) consistent across Tasks 1, 3, 4, 5.
