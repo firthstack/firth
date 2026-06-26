@@ -3,12 +3,12 @@
 Read this when developing in a Firth project. For command syntax/flags and Dockerfile templates, see `cli-reference.md`.
 
 ## Branching is the default unit of work
-`firth branch create <name>` provisions a complete **isolated environment**: its own Neon DB branch (copy-on-write copy of the parent's data, own `DATABASE_URL`) + its own dedicated compute (own Fly app + URL) **provisioned on its first `firth deploy`** (a branch is DB-only until then). Only the storage bucket is shared. Branches run **fully in parallel** — nothing one does touches another.
+`firth branch create <name>` provisions a complete **isolated environment**: its own Neon DB branch (copy-on-write copy of the parent's data, own `DATABASE_URL`) + its own copy-on-write storage bucket (forked from the parent at branch-create) + its own dedicated compute (own Fly app + URL) **provisioned on its first `firth deploy`** (until then a branch is DB + storage only). Branches run **fully in parallel** — nothing one does touches another. (Projects created before storage forking share one bucket — no per-branch storage isolation.)
 
 Per-branch loop:
 1. `firth branch create feat-x` — isolated DB env (compute spins up on first deploy). **Does NOT auto-switch you.**
 2. `firth branch switch feat-x` — sets the current branch (per-directory, in `./.firth/project.json`).
-3. `firth secrets` — writes feat-x's `DATABASE_URL` etc. into `./.env`. (DB + compute are per-branch; storage is shared.)
+3. `firth secrets` — writes feat-x's `DATABASE_URL`, `AWS_*` storage creds, etc. into `./.env`. (DB + storage + compute are all per-branch; legacy projects share storage.)
 4. Build, then `firth deploy . --port <n>` — deploys to feat-x's own compute; **the command prints feat-x's URL**.
 5. **Test against that URL directly** — it's public HTTPS, no tunnel. Sign up, hit the feature, check auth gates against the live branch.
 

@@ -10,9 +10,9 @@ Command catalog, deploy modes, Dockerfile templates, and govern/observe. For the
 | `firth project create <name>` | provision DB + storage + compute, link |
 | `firth project link <id>` · `firth project list` | link existing / list |
 | `firth project delete --yes` | tear down ALL resources + unlink (policy-gated by default) |
-| `firth branch create <name>` [`--from <parent>`] | isolated **DB** env: own Neon branch; **compute is provisioned on first deploy** (does NOT switch) |
+| `firth branch create <name>` [`--from <parent>`] | isolated env: own Neon branch + own copy-on-write storage bucket (forked from parent); **compute is provisioned on first deploy** (does NOT switch) |
 | `firth branch switch <name>` · `firth branch list` | set current branch / list |
-| `firth branch delete <name> --yes` | tear down branch's Neon branch + Fly app (not the default) |
+| `firth branch delete <name> --yes` | tear down branch's Neon branch + forked storage bucket + Fly app (not the default) |
 | `firth secrets` [`--branch <id>`] | write current/given branch creds → `./.env` |
 | `firth deploy <dir> --port <n>` \| `--image <url>` [`--from <branch>`] | deploy (see Deploy modes) |
 | `firth manifest` [`--json`] | env manifest: each env's databases / storage / compute + how they wire (public-url) |
@@ -20,7 +20,7 @@ Command catalog, deploy modes, Dockerfile templates, and govern/observe. For the
 | `firth policy` [`set <action> <allow\|deny\|approve>`] | view/set govern policy |
 | `firth approvals` · `firth approve <id>` · `firth deny <id>` | manage gated actions |
 
-`DATABASE_URL` + compute are **per-branch**; storage (`AWS_*`/`BUCKET_NAME`) is **shared**.
+`DATABASE_URL` + compute + storage (`AWS_*`/`BUCKET_NAME`) are **per-branch** (new projects: each branch copy-on-write-forks its parent's bucket; projects created before storage forking keep a **shared** bucket).
 
 ## Deploy modes
 ```
