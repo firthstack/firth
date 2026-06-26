@@ -39,6 +39,11 @@ const DETECTORS: Detector[] = [
 
 const PLACEHOLDER = /^(?:your[_-]|example|changeme|placeholder|dummy|sample|redacted|secret|x{4,}|<.+>|\.\.\.|0{6,}|1234567|test[_-]?(?:key|token|secret))/i
 const REFERENCE = /(process\.env|os\.environ|getenv|import\.meta|\$\{|\$[A-Za-z_]|config\.|settings\.|^env\.|^[A-Z][A-Z0-9_]{3,}$)/
+// A captured value that is a code expression — a bare identifier followed by ≥1 member access,
+// call, or index (authPassword.value, req.body.password, getSecret()) — is a reference, not a
+// literal secret. A bare identifier with no suffix (e.g. hunter2pass) is NOT excused, so real
+// unquoted/quoted literals still fire.
+const CODE_REFERENCE = /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*|\([^)]*\)|\[[^\]]*\])+$/
 
 const SECRET_FILE = /(?:^|\/)(?:\.env(?:\.[A-Za-z0-9_]+)?|\.aws\/credentials|\.ssh\/id_(?:rsa|dsa|ecdsa|ed25519)|id_(?:rsa|dsa|ecdsa|ed25519)|\.npmrc|\.pypirc|\.netrc|\.git-credentials|\.kube\/config|kubeconfig|\.docker(?:cfg|\/config\.json)|credentials\.json|service-account[^/]*\.json|[^/]+\.(?:pem|key|p12|pfx|keystore|jks))$/i
 const SECRET_FILE_SAFE = /\.(?:example|sample|template|dist)$|\.pub$/i
@@ -109,7 +114,7 @@ function scanText(text: string): Array<[number, number, string, string]> {
       const span = (m as RegExpExecArray & { indices?: Array<[number, number]> }).indices?.[gi]
       if (!secret || !span) continue
       if (PLACEHOLDER.test(secret)) continue
-      if (name === 'generic_secret_assignment' && REFERENCE.test(secret)) continue
+      if (name === 'generic_secret_assignment' && (REFERENCE.test(secret) || CODE_REFERENCE.test(secret))) continue
       hits.push([span[0], span[1], name, secret])
     }
   }

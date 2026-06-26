@@ -45,6 +45,26 @@ test('env-var reference is not a secret → no findings', () => {
     tool_input: { file_path: '/app/db.ts', content: 'const password = process.env.DB_PASSWORD' } })).toHaveLength(0)
 })
 
+test('code-reference RHS (member access / call) is not a secret → no generic finding', () => {
+  // Regression: `const password = authPassword.value` (a DOM value read) was flagged 6× in real use.
+  const read = scanEvent({ tool_name: 'Read', tool_input: { file_path: '/app/public/app.js' },
+    tool_response: { type: 'text', text: 'const email = authEmail.value.trim()\nconst password = authPassword.value\nif (!email) return' } })
+  expect(read.filter((x) => x.detector === 'generic_secret_assignment')).toHaveLength(0)
+
+  // Other common code expressions on the RHS: member chain and call.
+  for (const content of ['const password = req.body.password', 'const secret = getSecret()', 'const apiKey = this.config.apiKey']) {
+    const f = scanEvent({ tool_name: 'Write', tool_input: { file_path: '/app/src/x.js', content } })
+    expect(f.filter((x) => x.detector === 'generic_secret_assignment')).toHaveLength(0)
+  }
+})
+
+test('literal secret assignment still detected (guard against over-suppression)', () => {
+  // A bare quoted/opaque literal RHS is NOT a code reference and must still fire.
+  const f = scanEvent({ tool_name: 'Write',
+    tool_input: { file_path: '/app/src/config.js', content: "const password = 'hunter2pass'" } })
+  expect(f.some((x) => x.detector === 'generic_secret_assignment' && x.sink === 'nonsecret_file' && x.severity === 'high')).toBe(true)
+})
+
 test('placeholder → no findings', () => {
   expect(scanEvent({ tool_name: 'Write',
     tool_input: { file_path: '/app/.env.example', content: 'API_KEY=your_api_key_here' } })).toHaveLength(0)
