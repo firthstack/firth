@@ -6,3 +6,6 @@
 
 # Firth resource credentials written by `firth secrets` — local dev only, never commit
 .env
+
+# Firth: local project link + session state (per-machine, regenerable, not source)
+.firth/
