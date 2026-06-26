@@ -2,8 +2,10 @@ import { describe, expect, test } from 'vitest'
 import { TigrisAdapter } from '../../src/adapters/tigris.js'
 import type { SignedHttp } from '../../src/adapters/signed-http.js'
 
-const EMPTY_LIST_XML = `<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>`
-const ONE_OBJECT_LIST_XML = `<ListBucketResult><Contents><Key>some/object.txt</Key></Contents><IsTruncated>false</IsTruncated></ListBucketResult>`
+// ListObjectVersions XML shapes used by the version-aware destroy path
+const EMPTY_VERSIONS_XML = `<ListVersionsResult><IsTruncated>false</IsTruncated></ListVersionsResult>`
+const ONE_VERSION_XML = `<ListVersionsResult><IsTruncated>false</IsTruncated><Version><Key>some/object.txt</Key><VersionId>v1</VersionId></Version></ListVersionsResult>`
+const VERSION_AND_DELETE_MARKER_XML = `<ListVersionsResult><IsTruncated>false</IsTruncated><Version><Key>some/object.txt</Key><VersionId>v1</VersionId></Version><DeleteMarker><Key>other/file.bin</Key><VersionId>dm1</VersionId></DeleteMarker></ListVersionsResult>`
 
 function fake(routes: Array<{ match: (u: string, i: any) => boolean; status?: number; body?: any; text?: string }>) {
   const calls: Array<{ url: string; init: any }> = []
@@ -61,15 +63,16 @@ describe('TigrisAdapter provision/destroy', () => {
 
   test('destroy DELETEs the bucket (no accessKeyId — bucket-only teardown, empty bucket)', async () => {
     const { http, calls } = fake([
-      { match: (u, i) => i.method === 'GET' && u.includes('list-type=2'), status: 200, text: EMPTY_LIST_XML },
+      { match: (u, i) => i.method === 'GET' && u.includes('versions'), status: 200, text: EMPTY_VERSIONS_XML },
       { match: (u, i) => i.method === 'DELETE', status: 204 },
     ])
     const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
     const adapter = new TigrisAdapter(http, noop)
     await adapter.destroy({ kind: 's3', providerRef: { bucket: 'firth-x-abc', endpoint: 'https://t3.storage.dev', region: 'auto' } })
-    // First call should be the list, last should be bucket DELETE
+    // First call should be the ListObjectVersions, last should be bucket DELETE
     expect(calls[0].init.method).toBe('GET')
-    expect(calls[0].url).toContain('list-type=2')
+    expect(calls[0].url).toContain('versions')
+    expect(calls[0].url).not.toContain('list-type=2')
     expect(calls[calls.length - 1].init.method).toBe('DELETE')
     expect(calls[calls.length - 1].url).toMatch(/firth-x-abc$/)
   })
@@ -81,10 +84,43 @@ describe('TigrisAdapter provision/destroy', () => {
     await expect(adapter.provision('x')).rejects.toThrow(/tigris PUT .* failed: 403/)
   })
 
-  test('createBranch returns null (shared bucket)', async () => {
+  test('createBranch returns null (fork model; per-branch teardown via destroy)', async () => {
     const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
     const adapter = new TigrisAdapter(noop, noop)
     expect(await adapter.createBranch({ kind: 's3', providerRef: {} }, 'b')).toBeNull()
+  })
+
+  test('provision enables snapshots (header + providerRef flag) so the bucket is forkable', async () => {
+    const { http, calls } = fake([{ match: (u, i) => i.method === 'PUT', status: 200 }])
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(http, noop)
+    const handle = await adapter.provision('My App')
+    expect(calls[0].init.headers?.['X-Tigris-Enable-Snapshot']).toBe('true')
+    expect((handle.providerRef as any).snapshotEnabled).toBe(true)
+  })
+
+  test('forkBucket creates a CoW fork from the parent bucket (fork-source + enable-snapshot headers)', async () => {
+    const { http, calls } = fake([{ match: (u, i) => i.method === 'PUT', status: 200 }])
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(http, noop)
+    const parent = { kind: 's3' as const, providerRef: { bucket: 'firth-app-parent', endpoint: 'https://t3.storage.dev', region: 'auto', snapshotEnabled: true } }
+    const fork = await adapter.forkBucket(parent, 'feature')
+    const ref = fork.providerRef as any
+    expect(ref.bucket).toMatch(/^firth-feature-[a-z0-9]+$/)
+    expect(ref.bucket).not.toBe('firth-app-parent')
+    expect(ref.snapshotEnabled).toBe(true)
+    expect(calls[0].init.method).toBe('PUT')
+    expect(calls[0].url).toContain(ref.bucket)
+    expect(calls[0].init.headers?.['X-Tigris-Fork-Source-Bucket']).toBe('firth-app-parent')
+    expect(calls[0].init.headers?.['X-Tigris-Enable-Snapshot']).toBe('true')
+  })
+
+  test('forkBucket throws with status on non-2xx', async () => {
+    const { http } = fake([{ match: (u, i) => i.method === 'PUT', status: 403 }])
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(http, noop)
+    const parent = { kind: 's3' as const, providerRef: { bucket: 'firth-app-parent', endpoint: 'https://t3.storage.dev', region: 'auto' } }
+    await expect(adapter.forkBucket(parent, 'feature')).rejects.toThrow(/tigris fork PUT .* failed: 403/)
   })
 })
 
@@ -136,15 +172,15 @@ describe('TigrisAdapter.mintCredentials', () => {
 })
 
 describe('TigrisAdapter.destroy (with minted handles)', () => {
-  test('destroy with accessKeyId+policyArn issues DetachUserPolicy + DeletePolicy + DeleteAccessKey + lists objects + object DELETE + bucket DELETE', async () => {
+  test('destroy with accessKeyId+policyArn issues DetachUserPolicy + DeletePolicy + DeleteAccessKey + lists versions + versionId-scoped object DELETE + bucket DELETE', async () => {
     const bucket = 'firth-x-abc'
     const { iam, calls: iamCalls } = fakeIam(bucket)
     const s3Calls: any[] = []
     const s3: SignedHttp = async (url, init) => {
       s3Calls.push({ url, init })
-      // list returns one object
-      if (init.method === 'GET' && url.includes('list-type=2')) {
-        return { status: 200, json: async () => ({}), text: async () => ONE_OBJECT_LIST_XML }
+      // ListObjectVersions returns one version entry
+      if (init.method === 'GET' && url.includes('versions')) {
+        return { status: 200, json: async () => ({}), text: async () => ONE_VERSION_XML }
       }
       return { status: 204, json: async () => ({}), text: async () => '' }
     }
@@ -165,24 +201,26 @@ describe('TigrisAdapter.destroy (with minted handles)', () => {
     // IAM teardown sequence
     expect(iamCalls.map(c => c.action)).toEqual(['DetachUserPolicy', 'DeletePolicy', 'DeleteAccessKey'])
 
-    // S3 sequence: (a) list, (b) object delete, (c) bucket delete
+    // S3 sequence: (a) ListObjectVersions, (b) versionId-scoped object delete, (c) bucket delete
     expect(s3Calls.length).toBe(3)
 
-    // (a) list objects
+    // (a) list all versions (not list-type=2)
     expect(s3Calls[0].init.method).toBe('GET')
-    expect(s3Calls[0].url).toContain('list-type=2')
+    expect(s3Calls[0].url).toContain('versions')
+    expect(s3Calls[0].url).not.toContain('list-type=2')
     expect(s3Calls[0].url).toContain(bucket)
 
-    // (b) delete the object — key is some/object.txt, slash preserved, each segment percent-encoded
+    // (b) delete the specific version — key is some/object.txt, slash preserved, versionId=v1 in query string
     expect(s3Calls[1].init.method).toBe('DELETE')
     expect(s3Calls[1].url).toContain(`${bucket}/some/object.txt`)
+    expect(s3Calls[1].url).toContain('versionId=v1')
 
     // (c) delete the bucket itself
     expect(s3Calls[2].init.method).toBe('DELETE')
     expect(s3Calls[2].url).toMatch(new RegExp(`${bucket}$`))
   })
 
-  test('destroy with no accessKeyId/policyArn still lists+deletes bucket (empty list) and does not throw', async () => {
+  test('destroy with no accessKeyId/policyArn still lists versions+deletes bucket (empty versions list) and does not throw', async () => {
     const bucket = 'firth-no-mint'
     const iamCalls: any[] = []
     const iam: SignedHttp = async (url, init) => {
@@ -192,8 +230,8 @@ describe('TigrisAdapter.destroy (with minted handles)', () => {
     const s3Calls: any[] = []
     const s3: SignedHttp = async (url, init) => {
       s3Calls.push({ url, init })
-      if (init.method === 'GET' && url.includes('list-type=2')) {
-        return { status: 200, json: async () => ({}), text: async () => EMPTY_LIST_XML }
+      if (init.method === 'GET' && url.includes('versions')) {
+        return { status: 200, json: async () => ({}), text: async () => EMPTY_VERSIONS_XML }
       }
       return { status: 204, json: async () => ({}), text: async () => '' }
     }
@@ -208,10 +246,11 @@ describe('TigrisAdapter.destroy (with minted handles)', () => {
     // No IAM calls (nothing to detach/delete)
     expect(iamCalls.length).toBe(0)
 
-    // S3: list + bucket DELETE (no object deletes — empty bucket)
+    // S3: ListObjectVersions + bucket DELETE (no per-object deletes — empty bucket)
     expect(s3Calls.length).toBe(2)
     expect(s3Calls[0].init.method).toBe('GET')
-    expect(s3Calls[0].url).toContain('list-type=2')
+    expect(s3Calls[0].url).toContain('versions')
+    expect(s3Calls[0].url).not.toContain('list-type=2')
     expect(s3Calls[1].init.method).toBe('DELETE')
     expect(s3Calls[1].url).toContain(bucket)
   })
@@ -224,8 +263,9 @@ describe('TigrisAdapter.destroy (with minted handles)', () => {
       return { status: 500, json: async () => ({}), text: async () => '<Error/>' }
     }
     const s3: SignedHttp = async (url, init) => {
-      if (init.method === 'GET' && url.includes('list-type=2')) {
-        return { status: 200, json: async () => ({}), text: async () => EMPTY_LIST_XML }
+      // Use the new version-aware listing endpoint
+      if (init.method === 'GET' && url.includes('versions')) {
+        return { status: 200, json: async () => ({}), text: async () => EMPTY_VERSIONS_XML }
       }
       return { status: 204, json: async () => ({}), text: async () => '' }
     }
@@ -244,5 +284,150 @@ describe('TigrisAdapter.destroy (with minted handles)', () => {
     await expect(adapter.destroy(handle)).rejects.toThrow()
     // All three IAM steps were attempted despite failures
     expect(iamCallCount).toBe(3)
+  })
+
+  test('destroy on a forked bucket tolerates HTTP 400 on per-version DELETE (inherited CoW version) and still issues bucket DELETE', async () => {
+    const bucket = 'firth-fork-child'
+    const s3Calls: any[] = []
+    const s3: SignedHttp = async (url, init) => {
+      s3Calls.push({ url, init })
+      // ListObjectVersions returns one inherited version
+      if (init.method === 'GET' && url.includes('versions')) {
+        return { status: 200, json: async () => ({}), text: async () => ONE_VERSION_XML }
+      }
+      // Per-version DELETE returns 400 (inherited CoW version — not deletable from fork)
+      if (init.method === 'DELETE' && url.includes('versionId=')) {
+        return { status: 400, json: async () => ({}), text: async () => '<Error><Code>InvalidArgument</Code></Error>' }
+      }
+      // Bucket DELETE returns 204 (bucket can still be deleted despite inherited object)
+      return { status: 204, json: async () => ({}), text: async () => '' }
+    }
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(s3, noop)
+    const handle = {
+      kind: 's3' as const,
+      providerRef: { bucket, endpoint: 'https://t3.storage.dev', region: 'auto' },
+    }
+
+    // Must NOT throw — 400 on inherited version is tolerated
+    await expect(adapter.destroy(handle)).resolves.toBeUndefined()
+
+    // ListObjectVersions was called
+    expect(s3Calls.some(c => c.init.method === 'GET' && c.url.includes('versions'))).toBe(true)
+    // The per-version DELETE was attempted
+    expect(s3Calls.some(c => c.init.method === 'DELETE' && c.url.includes('versionId='))).toBe(true)
+    // The bucket DELETE was still issued (and the last DELETE targets the bucket root)
+    const lastDelete = [...s3Calls].reverse().find(c => c.init.method === 'DELETE')
+    expect(lastDelete?.url).toMatch(new RegExp(`${bucket}$`))
+  })
+
+  test('destroy treats HTTP 500 on a per-version DELETE as a real failure and throws', async () => {
+    const bucket = 'firth-real-fail'
+    const s3: SignedHttp = async (url, init) => {
+      if (init.method === 'GET' && url.includes('versions')) {
+        return { status: 200, json: async () => ({}), text: async () => ONE_VERSION_XML }
+      }
+      // Server-side error on per-version DELETE — this must NOT be tolerated
+      if (init.method === 'DELETE' && url.includes('versionId=')) {
+        return { status: 500, json: async () => ({}), text: async () => '<Error><Code>InternalError</Code></Error>' }
+      }
+      return { status: 204, json: async () => ({}), text: async () => '' }
+    }
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(s3, noop)
+    const handle = {
+      kind: 's3' as const,
+      providerRef: { bucket, endpoint: 'https://t3.storage.dev', region: 'auto' },
+    }
+
+    await expect(adapter.destroy(handle)).rejects.toThrow(/tigris destroy had.*failure/)
+  })
+
+  test('destroy paginates across two ListObjectVersions pages using IsTruncated+markers and deletes all versions before bucket DELETE', async () => {
+    const bucket = 'firth-paginated'
+    const PAGE_1_XML = `<ListVersionsResult><IsTruncated>true</IsTruncated><NextKeyMarker>k2</NextKeyMarker><NextVersionIdMarker>v2</NextVersionIdMarker><Version><Key>file1.txt</Key><VersionId>v1</VersionId></Version></ListVersionsResult>`
+    const PAGE_2_XML = `<ListVersionsResult><IsTruncated>false</IsTruncated><Version><Key>file2.txt</Key><VersionId>v3</VersionId></Version></ListVersionsResult>`
+
+    const s3Calls: any[] = []
+    let listCallCount = 0
+    const s3: SignedHttp = async (url, init) => {
+      s3Calls.push({ url, init })
+      if (init.method === 'GET' && url.includes('versions')) {
+        listCallCount++
+        if (listCallCount === 1) {
+          return { status: 200, json: async () => ({}), text: async () => PAGE_1_XML }
+        }
+        return { status: 200, json: async () => ({}), text: async () => PAGE_2_XML }
+      }
+      return { status: 204, json: async () => ({}), text: async () => '' }
+    }
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(s3, noop)
+    const handle = {
+      kind: 's3' as const,
+      providerRef: { bucket, endpoint: 'https://t3.storage.dev', region: 'auto' },
+    }
+
+    await adapter.destroy(handle)
+
+    // Two list calls were made
+    expect(listCallCount).toBe(2)
+
+    // Second list call carried the markers from page 1
+    const secondListCall = s3Calls.filter(c => c.init.method === 'GET' && c.url.includes('versions'))[1]
+    expect(secondListCall.url).toContain('key-marker=k2')
+    expect(secondListCall.url).toContain('version-id-marker=v2')
+
+    // Both versions were deleted
+    const deleteCalls = s3Calls.filter(c => c.init.method === 'DELETE' && c.url.includes('versionId='))
+    expect(deleteCalls.length).toBe(2)
+    expect(deleteCalls.some(c => c.url.includes('file1.txt') && c.url.includes('versionId=v1'))).toBe(true)
+    expect(deleteCalls.some(c => c.url.includes('file2.txt') && c.url.includes('versionId=v3'))).toBe(true)
+
+    // Bucket DELETE was issued last
+    const lastCall = s3Calls[s3Calls.length - 1]
+    expect(lastCall.init.method).toBe('DELETE')
+    expect(lastCall.url).toMatch(new RegExp(`${bucket}$`))
+  })
+
+  test('destroy with a Version AND a DeleteMarker both deleted by versionId before bucket DELETE (core snapshot regression)', async () => {
+    const bucket = 'firth-snapshot-bucket'
+    const s3Calls: any[] = []
+    const s3: SignedHttp = async (url, init) => {
+      s3Calls.push({ url, init })
+      if (init.method === 'GET' && url.includes('versions')) {
+        return { status: 200, json: async () => ({}), text: async () => VERSION_AND_DELETE_MARKER_XML }
+      }
+      return { status: 204, json: async () => ({}), text: async () => '' }
+    }
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(s3, noop)
+    const handle = {
+      kind: 's3' as const,
+      providerRef: { bucket, endpoint: 'https://t3.storage.dev', region: 'auto' },
+    }
+
+    await adapter.destroy(handle)
+
+    // Expect: ListObjectVersions, delete version, delete delete-marker, bucket DELETE
+    expect(s3Calls.length).toBe(4)
+
+    // (a) ListObjectVersions
+    expect(s3Calls[0].init.method).toBe('GET')
+    expect(s3Calls[0].url).toContain('versions')
+
+    // (b) delete the Version entry with versionId=v1
+    expect(s3Calls[1].init.method).toBe('DELETE')
+    expect(s3Calls[1].url).toContain(`${bucket}/some/object.txt`)
+    expect(s3Calls[1].url).toContain('versionId=v1')
+
+    // (c) delete the DeleteMarker entry with versionId=dm1
+    expect(s3Calls[2].init.method).toBe('DELETE')
+    expect(s3Calls[2].url).toContain(`${bucket}/other/file.bin`)
+    expect(s3Calls[2].url).toContain('versionId=dm1')
+
+    // (d) delete the bucket itself (now truly empty)
+    expect(s3Calls[3].init.method).toBe('DELETE')
+    expect(s3Calls[3].url).toMatch(new RegExp(`${bucket}$`))
   })
 })

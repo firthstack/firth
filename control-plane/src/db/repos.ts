@@ -64,6 +64,14 @@ export class ResourcesRepo {
     return ((data ?? [])[0] as ResourceRow) ?? null
   }
 
+  async findRootByKind(owner: string, projectId: string, kind: string): Promise<ResourceRow | null> {
+    // The project-root resource (branch_id IS NULL), e.g. main's bucket — never a branch fork row.
+    const { data, error } = await this.db.from('resources').select()
+      .eq('owner', owner).eq('project_id', projectId).eq('kind', kind).is('branch_id', null)
+    if (error) throw error
+    return ((data ?? [])[0] as ResourceRow) ?? null
+  }
+
   async findByKindForBranch(owner: string, projectId: string, branchId: string, kind: string): Promise<ResourceRow | null> {
     const { data, error } = await this.db.from('resources').select()
       .eq('owner', owner).eq('project_id', projectId).eq('branch_id', branchId).eq('kind', kind)

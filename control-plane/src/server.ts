@@ -144,10 +144,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const fly = adapters.find((a) => a.kind === 'fly') as (ProviderAdapter & { appState?: (h: ResourceHandle) => Promise<string> }) | undefined
 
     const nameById = new Map(branches.map((b) => [b.id, b.name]))
-    const s3 = resources.find((r) => r.kind === 's3')
-    const storage = s3
-      ? [{ name: 'assets', engine: 'tigris-s3', bucket: String((s3.provider_ref as any).bucket ?? (s3.provider_ref as any).bucketName ?? ''), shared: true, env: ['BUCKET_NAME', 'AWS_ENDPOINT_URL_S3', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION'] }]
-      : []
+    // Storage is per-branch now: the project-root bucket (branch_id null) belongs to the default
+    // branch; each forked branch has its own CoW bucket. Resolve per branch (mirrors fly below).
+    const rootS3 = resources.find((r) => r.kind === 's3' && !r.branch_id)
+    const s3ByBranch = new Map<string, any>()
+    for (const r of resources) if (r.kind === 's3' && r.branch_id) s3ByBranch.set(r.branch_id as string, r)
+    const rootForkable = !!(rootS3 && (rootS3.provider_ref as any).snapshotEnabled)
+    const storageFor = (b: { id: string }) => {
+      const fork = s3ByBranch.get(b.id)
+      const row = fork ?? rootS3
+      if (!row) return [] as any[]
+      // A forked branch is isolated; a branch falling back to the root is "shared" only when the
+      // root isn't forkable (legacy project) — in a forkable project the root is just main's bucket.
+      const shared = fork ? false : !rootForkable
+      return [{ name: 'assets', engine: 'tigris-s3', bucket: String((row.provider_ref as any).bucket ?? (row.provider_ref as any).bucketName ?? ''), shared, env: ['BUCKET_NAME', 'AWS_ENDPOINT_URL_S3', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION'] }]
+    }
     const flyByBranch = new Map<string, any[]>()
     for (const r of resources) if (r.kind === 'fly') { const k = (r.branch_id as string) ?? '__project__'; flyByBranch.set(k, [...(flyByBranch.get(k) ?? []), r]) }
     const neonExtra = new Map<string, any[]>()
@@ -155,6 +166,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
     const environments = await Promise.all(branches.map(async (b) => {
       const flyList: any[] = flyByBranch.get(b.id) ?? (b.is_default ? (flyByBranch.get('__project__') ?? []) : [])
+      const storage = storageFor(b)
       const databases = [
         ...(b.neon_branch_ref ? [{ name: 'primary', engine: 'neon-postgres', ref: b.neon_branch_ref, env: 'DATABASE_URL' }] : []),
         ...(neonExtra.get(b.id) ?? []).map((r) => ({ name: String((r.provider_ref as any).name ?? 'db'), engine: 'neon-postgres', ref: String((r.provider_ref as any).neonBranchRef ?? ''), env: `DATABASE_URL_${String((r.provider_ref as any).name ?? 'db').toUpperCase().replace(/[^A-Z0-9]/g, '_')}` })),

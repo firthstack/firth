@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import type { ProviderAdapter, ResourceHandle, SecretBundle, UsageSnapshot } from './types.js'
+import type { ProviderAdapter, ResourceHandle, SecretBundle, StorageAdapter, UsageSnapshot } from './types.js'
 import type { SignedHttp } from './signed-http.js'
 
 const S3_ENDPOINT = 'https://t3.storage.dev'
@@ -12,6 +12,7 @@ export type TigrisRef = {
   region: string
   accessKeyId?: string
   policyArn?: string
+  snapshotEnabled?: boolean
 }
 export type TigrisOptions = { s3Endpoint?: string; iamEndpoint?: string; region?: string }
 
@@ -25,9 +26,9 @@ function xmlField(text: string, tag: string): string | undefined {
   return text.match(new RegExp(`<${tag}>([^<]+)</${tag}>`))?.[1]
 }
 
-export class TigrisAdapter implements ProviderAdapter {
+export class TigrisAdapter implements StorageAdapter {
   readonly kind = 's3' as const
-  readonly branchModel = 'shared' as const
+  readonly branchModel = 'fork' as const
   readonly s3Endpoint: string
   readonly iamEndpoint: string
   readonly region: string
@@ -55,10 +56,11 @@ export class TigrisAdapter implements ProviderAdapter {
 
   async provision(projectName: string): Promise<ResourceHandle> {
     const bucket = mkBucketName(projectName, randomBytes(4).toString('hex'))
-    // S3 CreateBucket = PUT to the bucket subresource (path-style against the Tigris endpoint).
-    const res = await this.s3(`${this.s3Endpoint}/${bucket}`, { method: 'PUT' })
+    // S3 CreateBucket = PUT to the bucket subresource. The Tigris header opts the bucket into
+    // snapshots at creation — required for it to be forkable later (cannot be retrofitted).
+    const res = await this.s3(`${this.s3Endpoint}/${bucket}`, { method: 'PUT', headers: { 'X-Tigris-Enable-Snapshot': 'true' } })
     if (res.status < 200 || res.status >= 300) throw new Error(`tigris PUT /${bucket} failed: ${res.status}`)
-    const providerRef: TigrisRef = { bucket, endpoint: this.s3Endpoint, region: this.region }
+    const providerRef: TigrisRef = { bucket, endpoint: this.s3Endpoint, region: this.region, snapshotEnabled: true }
     return { kind: 's3', providerRef }
   }
 
@@ -94,44 +96,57 @@ export class TigrisAdapter implements ProviderAdapter {
     }
 
     // --- S3 bucket empty + DELETE (always attempted) ---
+    // Use ListObjectVersions (GET /{bucket}?versions) to enumerate ALL versions and delete markers.
+    // A plain DELETE on a versioned bucket only writes a delete marker; we must delete each version
+    // by versionId to permanently remove it so the bucket can be deleted (else 409).
     try {
-      // List and delete all objects before deleting the bucket (S3/Tigris returns 409 on non-empty)
-      let continuationToken: string | undefined
+      let keyMarker: string | undefined
+      let versionIdMarker: string | undefined
+      // Fix B: drive pagination on IsTruncated, not on marker presence.
+      // A truncated response may theoretically lack a NextKeyMarker (e.g. list-of-versions with
+      // only DeleteMarkers on the last key), so relying solely on marker presence could silently
+      // drop pages. Parse the IsTruncated element and set markers only when truncated.
+      let truncated = true
       do {
-        const listUrl = continuationToken
-          ? `${this.s3Endpoint}/${bucket}?list-type=2&continuation-token=${encodeURIComponent(continuationToken)}`
-          : `${this.s3Endpoint}/${bucket}?list-type=2`
+        let listUrl = `${this.s3Endpoint}/${bucket}?versions`
+        if (keyMarker) listUrl += `&key-marker=${encodeURIComponent(keyMarker)}`
+        if (versionIdMarker) listUrl += `&version-id-marker=${encodeURIComponent(versionIdMarker)}`
+
         const listRes = await this.s3(listUrl, { method: 'GET' })
         if (listRes.status < 200 || listRes.status >= 300) {
-          throw new Error(`tigris ListObjectsV2 /${bucket} failed: ${listRes.status}`)
+          throw new Error(`tigris ListObjectVersions /${bucket} failed: ${listRes.status}`)
         }
         const listXml = await listRes.text()
 
-        // Extract all object keys from this page
-        const keys: string[] = []
-        const keyRegex = /<Key>([^<]+)<\/Key>/g
+        // Extract all Version and DeleteMarker entries from this page
+        const entryRegex = /<(?:Version|DeleteMarker)>([\s\S]*?)<\/(?:Version|DeleteMarker)>/g
         let m: RegExpExecArray | null
-        while ((m = keyRegex.exec(listXml)) !== null) {
-          keys.push(m[1])
-        }
+        while ((m = entryRegex.exec(listXml)) !== null) {
+          const block = m[1]
+          const key = block.match(/<Key>([^<]+)<\/Key>/)?.[1]
+          const versionId = block.match(/<VersionId>([^<]+)<\/VersionId>/)?.[1]
+          if (!key || !versionId) continue
 
-        // Delete each object
-        for (const key of keys) {
           const encodedKey = key.split('/').map(encodeURIComponent).join('/')
-          const delRes = await this.s3(`${this.s3Endpoint}/${bucket}/${encodedKey}`, { method: 'DELETE' })
+          const delUrl = `${this.s3Endpoint}/${bucket}/${encodedKey}?versionId=${encodeURIComponent(versionId)}`
+          const delRes = await this.s3(delUrl, { method: 'DELETE' })
+          // Fix A: HTTP 400 on a per-version DELETE means this is an inherited CoW version from a
+          // parent bucket — the fork can list it but cannot delete it by versionId. Crucially, an
+          // inherited version does NOT block bucket deletion (DELETE /{bucket} succeeds regardless).
+          // Skip it silently; any other non-2xx (e.g. 403, 500) is a genuine failure.
+          if (delRes.status === 400) continue
           if (delRes.status < 200 || delRes.status >= 300) {
-            throw new Error(`tigris DELETE /${bucket}/${encodedKey} failed: ${delRes.status}`)
+            errors.push(new Error(`tigris DELETE /${bucket}/${encodedKey}?versionId=... failed: ${delRes.status}`))
           }
         }
 
-        // Check if there are more pages
-        const truncated = /<IsTruncated>true<\/IsTruncated>/.test(listXml)
+        // Fix B: parse IsTruncated to decide whether to fetch the next page
+        truncated = /<IsTruncated>true<\/IsTruncated>/.test(listXml)
         if (truncated) {
-          continuationToken = listXml.match(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/)?.[1]
-        } else {
-          continuationToken = undefined
+          keyMarker = listXml.match(/<NextKeyMarker>([^<]+)<\/NextKeyMarker>/)?.[1]
+          versionIdMarker = listXml.match(/<NextVersionIdMarker>([^<]+)<\/NextVersionIdMarker>/)?.[1]
         }
-      } while (continuationToken !== undefined)
+      } while (truncated)
     } catch (e) {
       errors.push(e as Error)
     }
@@ -148,7 +163,22 @@ export class TigrisAdapter implements ProviderAdapter {
 
   async createBranch(_handle: ResourceHandle, _name: string, _parentRef?: string): Promise<string | null> { return null }
 
-  async deleteBranch(): Promise<void> { /* no per-branch resource: storage shared, compute redeploys */ }
+  async deleteBranch(): Promise<void> { /* fork buckets are torn down via destroy() on the branch's s3 resource */ }
+
+  async forkBucket(parent: ResourceHandle, name: string): Promise<ResourceHandle> {
+    const parentRef = parent.providerRef as TigrisRef
+    const bucket = mkBucketName(name, randomBytes(4).toString('hex'))
+    // CoW fork: CreateBucket with the fork-source header. Enable snapshots on the fork too so it
+    // can itself be forked (grandchild branches). No snapshot version → Tigris snapshots the
+    // source at fork time ("fork from now").
+    const res = await this.s3(`${this.s3Endpoint}/${bucket}`, {
+      method: 'PUT',
+      headers: { 'X-Tigris-Enable-Snapshot': 'true', 'X-Tigris-Fork-Source-Bucket': parentRef.bucket },
+    })
+    if (res.status < 200 || res.status >= 300) throw new Error(`tigris fork PUT /${bucket} failed: ${res.status}`)
+    const providerRef: TigrisRef = { bucket, endpoint: this.s3Endpoint, region: this.region, snapshotEnabled: true }
+    return { kind: 's3', providerRef }
+  }
 
   async mintCredentials(handle: ResourceHandle): Promise<SecretBundle> {
     const ref = handle.providerRef as TigrisRef

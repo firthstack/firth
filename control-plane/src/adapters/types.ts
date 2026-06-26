@@ -11,7 +11,7 @@ export type HttpClient = (
 
 export interface ProviderAdapter {
   readonly kind: ProviderKind
-  readonly branchModel: 'native' | 'shared' | 'redeploy'
+  readonly branchModel: 'native' | 'shared' | 'redeploy' | 'fork'
   provision(projectName: string): Promise<ResourceHandle>
   destroy(handle: ResourceHandle): Promise<void>
   createBranch(handle: ResourceHandle, name: string, parentRef?: string): Promise<string | null>
@@ -28,4 +28,9 @@ export interface ComputeAdapter extends ProviderAdapter {
   // Runtime state of the app's compute: 'running' | 'suspended' | 'stopped' | 'none' | 'unknown'.
   appState(handle: ResourceHandle): Promise<string>
   mintDeployToken(handle: ResourceHandle, opts: { expirySeconds: number }): Promise<{ token: string; expirySeconds: number }>
+}
+
+export interface StorageAdapter extends ProviderAdapter {
+  // CoW-fork an existing (snapshot-enabled) bucket into a new branch-scoped bucket.
+  forkBucket(parent: ResourceHandle, name: string): Promise<ResourceHandle>
 }

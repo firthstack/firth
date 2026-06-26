@@ -90,6 +90,77 @@ async function main() {
     await adapter.destroy(handle)
     console.log('destroyed key + policy + bucket (cleanup) ✓')
   }
+
+  await forkCheck(adapter, s3)
+}
+
+// --- Copy-on-write fork checkpoint --------------------------------------------
+// Verifies the real Tigris fork behavior our offline tests can only fake:
+// (1) a fork shares the parent's objects (CoW), (2) writes to the fork don't
+// leak to the parent (isolation, both new + overwrite), and (3) a fork is
+// itself re-forkable (the one fact the docs didn't fully settle).
+async function forkCheck(adapter: TigrisAdapter, s3: ReturnType<typeof makeSignedHttp>) {
+  console.log('\n=== FORK (CoW) CHECK ===')
+  const tag = process.env.LIVE_TAG ?? String(Date.now())
+  const endpoint = 'https://t3.storage.dev'
+  const put = (bucket: string, key: string, body: string) =>
+    s3(`${endpoint}/${bucket}/${key}`, { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body })
+  const getText = async (bucket: string, key: string) => {
+    const r = await s3(`${endpoint}/${bucket}/${key}`, { method: 'GET' })
+    return { status: r.status, text: r.status >= 200 && r.status < 300 ? await r.text() : '' }
+  }
+
+  let failures = 0
+  const check = (label: string, ok: boolean, detail = '') => {
+    console.log(`  ${ok ? 'PASS' : 'FAIL'}: ${label}${detail ? ` (${detail})` : ''}`)
+    if (!ok) failures++
+  }
+
+  const seed = await adapter.provision(`firth-fork-seed-${tag}`)
+  const seedBucket = (seed.providerRef as any).bucket as string
+  console.log(`seed bucket "${seedBucket}" snapshotEnabled=${(seed.providerRef as any).snapshotEnabled}`)
+  const handles = [seed]
+  try {
+    const sharedKey = 'shared.txt'
+    const putSeed = await put(seedBucket, sharedKey, 'from-parent')
+    check('seed PUT shared object', putSeed.status >= 200 && putSeed.status < 300, `status ${putSeed.status}`)
+
+    // fork seed → child
+    const child = await adapter.forkBucket(seed, `firth-fork-child-${tag}`)
+    handles.unshift(child)
+    const childBucket = (child.providerRef as any).bucket as string
+    console.log(`child fork "${childBucket}"`)
+
+    // (1) CoW share: child inherits the parent's object
+    const inh = await getText(childBucket, sharedKey)
+    check('child inherits parent object (CoW share)', inh.status === 200 && inh.text === 'from-parent', `status ${inh.status}, body "${inh.text}"`)
+
+    // (2a) isolation: a NEW object in the child is invisible to the parent
+    await put(childBucket, 'child-only.txt', 'only-in-child')
+    const leak = await getText(seedBucket, 'child-only.txt')
+    check('parent does NOT see child-only object (isolation)', leak.status === 404, `status ${leak.status}`)
+
+    // (2b) isolation: overwriting the shared object in the child leaves the parent's copy intact
+    await put(childBucket, sharedKey, 'mutated-in-child')
+    const parentStill = await getText(seedBucket, sharedKey)
+    check('parent keeps original after child overwrite (isolation)', parentStill.text === 'from-parent', `parent body "${parentStill.text}"`)
+
+    // (3) re-forkability: fork the child → grandchild (the key unknown)
+    const grand = await adapter.forkBucket(child, `firth-fork-grand-${tag}`)
+    handles.unshift(grand)
+    const grandBucket = (grand.providerRef as any).bucket as string
+    check('fork is itself re-forkable (grandchild created)', true, grandBucket)
+    const grandInh = await getText(grandBucket, sharedKey)
+    check('grandchild inherits child state', grandInh.status === 200 && grandInh.text === 'mutated-in-child', `status ${grandInh.status}, body "${grandInh.text}"`)
+  } finally {
+    for (const h of handles) {
+      try { await adapter.destroy(h); console.log(`cleaned up "${(h.providerRef as any).bucket}" ✓`) }
+      catch (e: any) { console.log(`warning: cleanup failed for "${(h.providerRef as any).bucket}": ${e.message}`) }
+    }
+  }
+
+  console.log(failures === 0 ? '\nFORK CHECK: ALL PASS' : `\nFORK CHECK: ${failures} FAILURE(S)`)
+  if (failures > 0) throw new Error(`fork check had ${failures} failure(s)`)
 }
 
 main().catch((e) => {

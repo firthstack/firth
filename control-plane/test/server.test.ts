@@ -677,3 +677,39 @@ test('policy: unknown action → 400', async () => {
   const r = await app.inject({ method: 'PUT', url: '/projects/p1/policy/bogus', headers: { authorization: 'Bearer good' }, payload: { decision: 'deny' } })
   expect(r.statusCode).toBe(400)
 })
+
+// ---- Manifest per-branch storage tests ----
+
+test('GET /projects/:id/manifest resolves per-branch storage: root bucket for default, fork bucket for non-default', async () => {
+  const db = fakeData()
+  // Seed project
+  db.tables.projects.push({ id: 'p-cow', owner: 'uid-1', name: 'cow-project', status: 'active' })
+  // Seed two branches: main (default) and feat (non-default, with its own fork bucket)
+  db.tables.branches.push({ id: 'b-main', owner: 'uid-1', project_id: 'p-cow', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' })
+  db.tables.branches.push({ id: 'b-feat', owner: 'uid-1', project_id: 'p-cow', name: 'feat', parent_branch_id: 'b-main', is_default: false, neon_branch_ref: 'br-feat', status: 'active' })
+  // Root S3 bucket (branch_id absent/null → project root, belongs to main / default branch)
+  db.tables.resources.push({ id: 'r-s3-root', owner: 'uid-1', project_id: 'p-cow', kind: 's3', branch_id: null, provider_ref: { bucket: 'firth-cow-root', endpoint: 'https://t3.storage.dev', region: 'auto', snapshotEnabled: true }, status: 'active' })
+  // Branch-scoped fork bucket for feat (branch_id set)
+  db.tables.resources.push({ id: 'r-s3-fork', owner: 'uid-1', project_id: 'p-cow', kind: 's3', branch_id: 'b-feat', provider_ref: { bucket: 'firth-cow-fork', endpoint: 'https://t3.storage.dev', region: 'auto', snapshotEnabled: true }, status: 'active' })
+
+  const app = buildServer({ cfg, verifyToken: async () => ({ id: 'uid-1' }), dataForToken: () => db as any, adaptersForToken: () => [] })
+  const r = await app.inject({ method: 'GET', url: '/projects/p-cow/manifest', headers: { authorization: 'Bearer good' } })
+  expect(r.statusCode).toBe(200)
+  const { environments } = r.json()
+
+  const mainEnv = environments.find((e: any) => e.name === 'main')
+  const featEnv = environments.find((e: any) => e.name === 'feat')
+
+  // (a) default branch uses the root bucket, shared: false (forkable project)
+  expect(mainEnv.storage).toHaveLength(1)
+  expect(mainEnv.storage[0].bucket).toBe('firth-cow-root')
+  expect(mainEnv.storage[0].shared).toBe(false)
+
+  // (b) non-default branch with its own fork row uses its fork bucket, shared: false
+  expect(featEnv.storage).toHaveLength(1)
+  expect(featEnv.storage[0].bucket).toBe('firth-cow-fork')
+  expect(featEnv.storage[0].shared).toBe(false)
+
+  // (c) the two branches show DIFFERENT buckets
+  expect(mainEnv.storage[0].bucket).not.toBe(featEnv.storage[0].bucket)
+})
