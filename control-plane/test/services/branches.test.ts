@@ -48,6 +48,35 @@ const seeded = () => fakeDb({
   branches: [{ id: 'b-main', owner: 'o', project_id: 'p', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' }],
 })
 
+const seededWithS3 = () => fakeDb({
+  resources: [
+    { id: 'r1', owner: 'o', project_id: 'p', kind: 'neon', branch_id: null, provider_ref: { neonProjectId: 'np', defaultBranchId: 'br-main', dbName: 'neondb', roleName: 'neondb_owner' }, status: 'active' },
+    { id: 'r-s3', owner: 'o', project_id: 'p', kind: 's3', branch_id: null, provider_ref: { bucket: 'firth-app-root', endpoint: 'e', region: 'auto', snapshotEnabled: true }, status: 'active' },
+  ],
+  branches: [{ id: 'b-main', owner: 'o', project_id: 'p', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' }],
+})
+
+function s3Adapter(over: Partial<any> = {}): any & { forked: Array<{ parent: string; name: string }>; destroyed: string[] } {
+  const forked: Array<{ parent: string; name: string }> = []
+  const destroyed: string[] = []
+  return {
+    forked, destroyed, kind: 's3', branchModel: 'fork',
+    async provision(name: string) { return { kind: 's3', providerRef: { bucket: `firth-${name}-root`, endpoint: 'e', region: 'auto', snapshotEnabled: true } } },
+    async destroy(h: any) { destroyed.push((h.providerRef as any).bucket) },
+    async createBranch() { return null },
+    async deleteBranch() {},
+    async forkBucket(parent: any, name: string) {
+      forked.push({ parent: (parent.providerRef as any).bucket, name })
+      return { kind: 's3', providerRef: { bucket: `firth-${name}-fork`, endpoint: 'e', region: 'auto', snapshotEnabled: true } }
+    },
+    async mintCredentials(h: any) {
+      return { AWS_ACCESS_KEY_ID: 'k', AWS_SECRET_ACCESS_KEY: 's', AWS_ENDPOINT_URL_S3: 'e', BUCKET_NAME: (h.providerRef as any).bucket, AWS_REGION: 'auto' }
+    },
+    async readUsage() { return {} },
+    ...over,
+  }
+}
+
 function flyAdapter(over: Partial<ProviderAdapter> = {}): ProviderAdapter & { provisioned: string[]; destroyed: string[] } {
   const provisioned: string[] = []
   const destroyed: string[] = []
@@ -125,5 +154,65 @@ describe('BranchService.createBranch', () => {
     })
     await expect(new BranchService(db as any, cfg, [neonAdapter(), flyAdapter()]).createBranch('o', 'p', 'feat', 'broken'))
       .rejects.toThrow(/not active/i)
+  })
+})
+
+describe('BranchService storage fork', () => {
+  test('forks the project root bucket and stores branch-scoped AWS_* when the root is snapshot-enabled', async () => {
+    const db = seededWithS3(); const s3 = s3Adapter()
+    const { branch } = await new BranchService(db as any, cfg, [neonAdapter(), s3, flyAdapter()]).createBranch('o', 'p', 'feature')
+    // forked off main's root bucket
+    expect(s3.forked).toEqual([{ parent: 'firth-app-root', name: 'feature' }])
+    // a branch-scoped s3 resource row exists
+    const s3Row = db.tables.resources.find((r: any) => r.kind === 's3' && r.branch_id === branch.id)
+    expect(s3Row?.provider_ref.bucket).toBe('firth-feature-fork')
+    expect(s3Row?.status).toBe('active')
+    // all 5 AWS_* creds (+ BUCKET_NAME) are branch-scoped alongside DATABASE_URL — they override main's project-scoped creds
+    const names = db.tables.secrets.filter((s: any) => s.branch_id === branch.id).map((s: any) => s.name).sort()
+    expect(names).toEqual(['AWS_ACCESS_KEY_ID', 'AWS_ENDPOINT_URL_S3', 'AWS_REGION', 'AWS_SECRET_ACCESS_KEY', 'BUCKET_NAME', 'DATABASE_URL'])
+  })
+
+  test('does NOT fork when the project root bucket is not snapshot-enabled (legacy project)', async () => {
+    const db = seededWithS3()
+    // make the root bucket legacy (no snapshotEnabled flag)
+    db.tables.resources.find((r: any) => r.kind === 's3').provider_ref = { bucket: 'firth-legacy-root', endpoint: 'e', region: 'auto' }
+    const s3 = s3Adapter()
+    const { branch } = await new BranchService(db as any, cfg, [neonAdapter(), s3, flyAdapter()]).createBranch('o', 'p', 'feature')
+    expect(s3.forked).toEqual([])
+    expect(db.tables.resources.find((r: any) => r.kind === 's3' && r.branch_id === branch.id)).toBeFalsy()
+    // branch still active with its DB
+    expect(db.tables.branches.find((b: any) => b.id === branch.id)?.status).toBe('active')
+  })
+
+  test('forks off the PARENT branch bucket when --from is a non-default branch', async () => {
+    const db = seededWithS3()
+    // add an existing feature branch with its own fork bucket
+    db.tables.branches.push({ id: 'b-feat', owner: 'o', project_id: 'p', name: 'feat', parent_branch_id: 'b-main', is_default: false, neon_branch_ref: 'br-feat', status: 'active' })
+    db.tables.resources.push({ id: 'r-s3-feat', owner: 'o', project_id: 'p', kind: 's3', branch_id: 'b-feat', provider_ref: { bucket: 'firth-feat-fork', endpoint: 'e', region: 'auto', snapshotEnabled: true }, status: 'active' })
+    const s3 = s3Adapter()
+    await new BranchService(db as any, cfg, [neonAdapter(), s3, flyAdapter()]).createBranch('o', 'p', 'child', 'feat')
+    expect(s3.forked).toEqual([{ parent: 'firth-feat-fork', name: 'child' }])
+  })
+
+  test('rollback: a failing forkBucket deletes the neon branch, marks the branch error, stores no s3 secrets', async () => {
+    const db = seededWithS3()
+    const neon = neonAdapter()
+    const s3 = s3Adapter({ async forkBucket() { throw new Error('fork failed') } })
+    await expect(new BranchService(db as any, cfg, [neon, s3, flyAdapter()]).createBranch('o', 'p', 'feature'))
+      .rejects.toThrow(/fork failed/)
+    expect((neon as any).deleted).toEqual(['br-new'])
+    expect(db.tables.branches.find((b: any) => b.name === 'feature').status).toBe('error')
+    expect(db.tables.secrets.some((s: any) => s.name.startsWith('AWS_'))).toBe(false)
+  })
+
+  test('rollback: a failing s3 mintCredentials destroys the fork bucket and deletes the neon branch', async () => {
+    const db = seededWithS3()
+    const neon = neonAdapter()
+    const s3 = s3Adapter({ async mintCredentials() { throw new Error('s3 mint failed') } })
+    await expect(new BranchService(db as any, cfg, [neon, s3, flyAdapter()]).createBranch('o', 'p', 'feature'))
+      .rejects.toThrow(/s3 mint failed/)
+    expect(s3.destroyed).toEqual(['firth-feature-fork'])  // fork bucket cleaned up
+    expect((neon as any).deleted).toEqual(['br-new'])
+    expect(db.tables.branches.find((b: any) => b.name === 'feature').status).toBe('error')
   })
 })
