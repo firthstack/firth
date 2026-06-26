@@ -97,6 +97,16 @@ test('ResourcesRepo.findByKind returns the matching resource or null', async () 
   expect(await repo.findByKind('o', 'p', 'fly')).toBeNull()
 })
 
+test('ResourcesRepo.findRootByKind returns only the project-root (branch_id null) s3 resource', async () => {
+  const db = fakeDb({ resources: [
+    { id: 'r-root', owner: 'o', project_id: 'p', kind: 's3', branch_id: null, provider_ref: { bucket: 'root' }, status: 'active' },
+    { id: 'r-fork', owner: 'o', project_id: 'p', kind: 's3', branch_id: 'b-feat', provider_ref: { bucket: 'fork' }, status: 'active' },
+  ] })
+  const repo = new ResourcesRepo(db as any)
+  expect((await repo.findRootByKind('o', 'p', 's3'))?.id).toBe('r-root')
+  expect(await repo.findRootByKind('o', 'p', 'fly')).toBeNull()
+})
+
 test('BranchesRepo.findByName + create + listByProject', async () => {
   const db = fakeDb({ branches: [
     { id: 'b-main', owner: 'o', project_id: 'p', name: 'main', parent_branch_id: null, is_default: true, neon_branch_ref: 'br-main', status: 'active' },
