@@ -19,7 +19,7 @@ Engineering principles that govern the design: orchestrate providers, don't be a
 | **Resources** | Neon (DB) · S3 (storage) · Fly.io (compute) | — |
 | **Hosting** | Managed SaaS | The resource layer can't be self-hosted (provider accounts + secrets live on Firth's side). |
 | **Credential path** | Provisioning-centric + env injection now, behind a **secret seam** | Ships fast; the seam lets us upgrade to runtime credential brokering later without rewriting apps. |
-| **Branching** | DB native; storage shared; compute per-branch (isolated Fly app) | See §8. |
+| **Branching** | DB native; storage CoW-forked (new projects); compute per-branch (isolated Fly app) | See §8. |
 | **Backend** | [InsForge](https://insforge.dev) | See §4. |
 
 **Out of scope for v1:** failure-analysis triage logic (collect signals only), runtime credential brokering, full billing (metering stubbed).
@@ -89,7 +89,7 @@ interface ProviderAdapter {
 | | provision | branchModel | mintCredentials |
 |---|---|---|---|
 | Neon | project/DB in Firth's Neon org | `native` (API branch) | that branch's connection string |
-| S3 | bucket in Firth's Tigris account (S3-compatible; `t3.storage.dev`) via bucket-scoped keys minted through Tigris IAM (`iam.storage.dev`) | `shared` (createBranch→null) | bucket-scoped creds |
+| S3 | bucket in Firth's Tigris account (S3-compatible; `t3.storage.dev`) via bucket-scoped keys minted through Tigris IAM (`iam.storage.dev`) | `fork` (CoW bucket fork) | bucket-scoped creds |
 | Fly | app in Firth's Fly org | `redeploy` (no branch) | (compute consumes others' creds) |
 
 Adapters call provider APIs directly — we orchestrate, we don't re-abstract a provider's features (any such wrapper becomes a liability the moment the provider's API drifts).
@@ -110,17 +110,17 @@ Firth's DB holds every customer's resource credentials — the juiciest target o
 | Resource | On branch | Isolated? |
 |---|---|---|
 | DB (Neon) | native copy-on-write branch, one per branch | ✅ truly isolated |
-| Storage (S3) | all branches share one bucket | ❌ not isolated |
+| Storage (S3) | CoW-forked bucket, one per branch (new projects) | ✅ isolated (legacy projects: shared) |
 | Compute (Fly) | per-branch isolated app (provisioned at branch-create) | n/a (reproducible) |
 
-A branch ≈ a Neon DB branch + that branch's own secret (connection string) + the shared bucket + that branch's own isolated Fly app.
+A branch ≈ a Neon DB branch + that branch's own secrets (connection string + bucket credentials) + that branch's own CoW-forked bucket + that branch's own isolated Fly app.
 
-**Honest caveat (a known hole, not papered over):** because storage is shared, a branch gives **no isolation for S3** — an agent that deletes/overwrites objects on a branch affects the main branch, and discarding the branch won't bring them back. "branch = undo" holds for the DB only. Storage recovery needs a separate mechanism (S3 versioning, or Observe + a compensating action). Each branch has its own Fly app, so multiple branches' compute run in parallel; deploying "on a branch" targets that branch's app.
+**Storage isolation (new projects):** each branch gets a Tigris copy-on-write fork of its parent's bucket — objects are shared until written, so an agent on a branch can read/overwrite/delete freely without touching the parent, and deleting the branch discards its bucket. "branch = undo" now holds for storage too. **Legacy caveat:** projects whose root bucket was created before snapshots were enabled cannot be forked (Tigris requires snapshots at bucket creation), so their branches keep the old shared-bucket behavior — no isolation, discarding the branch won't restore objects. Each branch also has its own Fly app; deploying "on a branch" targets that branch's app.
 
 ## 9. Key flows & the provisioning saga
 
 - **`firth project create <name>`** — insert project + default `main` branch; concurrently provision Neon (+ create its `main` branch), S3, Fly; `mintCredentials` → encrypt → store; the CLI pulls provider skills locally. Because this is multi-step across three external providers, **partial failure is the norm**: it runs as a **saga** — each step records `resources.status`, is idempotent/retryable, and on failure either resumes or compensates (destroys partial resources). Never leave orphan resources; never report false success.
-- **`firth branch create <name> [--from main]`** — insert branch; `NeonAdapter.createBranch` (native); mint that branch's DB connection string; S3 is shared (no-op); Fly provisions a new isolated app for the branch.
+- **`firth branch create <name> [--from main]`** — insert branch; `NeonAdapter.createBranch` (native); mint that branch's DB connection string; S3 CoW-forks the parent's bucket (new projects; legacy stays shared); Fly provisions a new isolated app for the branch.
 - **`firth deploy [--branch]`** — bundle source → resolve the branch's secret bundle via the seam → inject into Fly → deploy → emit a side-effect event to Observe.
 
 ## 10. Observability & failure analysis
