@@ -96,44 +96,50 @@ export class TigrisAdapter implements StorageAdapter {
     }
 
     // --- S3 bucket empty + DELETE (always attempted) ---
+    // Use ListObjectVersions (GET /{bucket}?versions) to enumerate ALL versions and delete markers.
+    // A plain DELETE on a versioned bucket only writes a delete marker; we must delete each version
+    // by versionId to permanently remove it so the bucket can be deleted (else 409).
     try {
-      // List and delete all objects before deleting the bucket (S3/Tigris returns 409 on non-empty)
-      let continuationToken: string | undefined
+      let keyMarker: string | undefined
+      let versionIdMarker: string | undefined
       do {
-        const listUrl = continuationToken
-          ? `${this.s3Endpoint}/${bucket}?list-type=2&continuation-token=${encodeURIComponent(continuationToken)}`
-          : `${this.s3Endpoint}/${bucket}?list-type=2`
+        let listUrl = `${this.s3Endpoint}/${bucket}?versions`
+        if (keyMarker) listUrl += `&key-marker=${encodeURIComponent(keyMarker)}`
+        if (versionIdMarker) listUrl += `&version-id-marker=${encodeURIComponent(versionIdMarker)}`
+
         const listRes = await this.s3(listUrl, { method: 'GET' })
         if (listRes.status < 200 || listRes.status >= 300) {
-          throw new Error(`tigris ListObjectsV2 /${bucket} failed: ${listRes.status}`)
+          throw new Error(`tigris ListObjectVersions /${bucket} failed: ${listRes.status}`)
         }
         const listXml = await listRes.text()
 
-        // Extract all object keys from this page
-        const keys: string[] = []
-        const keyRegex = /<Key>([^<]+)<\/Key>/g
+        // Extract all Version and DeleteMarker entries from this page
+        const entryRegex = /<(?:Version|DeleteMarker)>([\s\S]*?)<\/(?:Version|DeleteMarker)>/g
         let m: RegExpExecArray | null
-        while ((m = keyRegex.exec(listXml)) !== null) {
-          keys.push(m[1])
-        }
+        while ((m = entryRegex.exec(listXml)) !== null) {
+          const block = m[1]
+          const key = block.match(/<Key>([^<]+)<\/Key>/)?.[1]
+          const versionId = block.match(/<VersionId>([^<]+)<\/VersionId>/)?.[1]
+          if (!key || !versionId) continue
 
-        // Delete each object
-        for (const key of keys) {
           const encodedKey = key.split('/').map(encodeURIComponent).join('/')
-          const delRes = await this.s3(`${this.s3Endpoint}/${bucket}/${encodedKey}`, { method: 'DELETE' })
+          const delUrl = `${this.s3Endpoint}/${bucket}/${encodedKey}?versionId=${encodeURIComponent(versionId)}`
+          const delRes = await this.s3(delUrl, { method: 'DELETE' })
           if (delRes.status < 200 || delRes.status >= 300) {
-            throw new Error(`tigris DELETE /${bucket}/${encodedKey} failed: ${delRes.status}`)
+            throw new Error(`tigris DELETE /${bucket}/${encodedKey}?versionId=... failed: ${delRes.status}`)
           }
         }
 
-        // Check if there are more pages
+        // Paginate while truncated
         const truncated = /<IsTruncated>true<\/IsTruncated>/.test(listXml)
         if (truncated) {
-          continuationToken = listXml.match(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/)?.[1]
+          keyMarker = listXml.match(/<NextKeyMarker>([^<]+)<\/NextKeyMarker>/)?.[1]
+          versionIdMarker = listXml.match(/<NextVersionIdMarker>([^<]+)<\/NextVersionIdMarker>/)?.[1]
         } else {
-          continuationToken = undefined
+          keyMarker = undefined
+          versionIdMarker = undefined
         }
-      } while (continuationToken !== undefined)
+      } while (keyMarker !== undefined)
     } catch (e) {
       errors.push(e as Error)
     }
