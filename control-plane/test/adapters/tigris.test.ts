@@ -86,6 +86,39 @@ describe('TigrisAdapter provision/destroy', () => {
     const adapter = new TigrisAdapter(noop, noop)
     expect(await adapter.createBranch({ kind: 's3', providerRef: {} }, 'b')).toBeNull()
   })
+
+  test('provision enables snapshots (header + providerRef flag) so the bucket is forkable', async () => {
+    const { http, calls } = fake([{ match: (u, i) => i.method === 'PUT', status: 200 }])
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(http, noop)
+    const handle = await adapter.provision('My App')
+    expect(calls[0].init.headers?.['X-Tigris-Enable-Snapshot']).toBe('true')
+    expect((handle.providerRef as any).snapshotEnabled).toBe(true)
+  })
+
+  test('forkBucket creates a CoW fork from the parent bucket (fork-source + enable-snapshot headers)', async () => {
+    const { http, calls } = fake([{ match: (u, i) => i.method === 'PUT', status: 200 }])
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(http, noop)
+    const parent = { kind: 's3' as const, providerRef: { bucket: 'firth-app-parent', endpoint: 'https://t3.storage.dev', region: 'auto', snapshotEnabled: true } }
+    const fork = await adapter.forkBucket(parent, 'feature')
+    const ref = fork.providerRef as any
+    expect(ref.bucket).toMatch(/^firth-feature-[a-z0-9]+$/)
+    expect(ref.bucket).not.toBe('firth-app-parent')
+    expect(ref.snapshotEnabled).toBe(true)
+    expect(calls[0].init.method).toBe('PUT')
+    expect(calls[0].url).toContain(ref.bucket)
+    expect(calls[0].init.headers?.['X-Tigris-Fork-Source-Bucket']).toBe('firth-app-parent')
+    expect(calls[0].init.headers?.['X-Tigris-Enable-Snapshot']).toBe('true')
+  })
+
+  test('forkBucket throws with status on non-2xx', async () => {
+    const { http } = fake([{ match: (u, i) => i.method === 'PUT', status: 403 }])
+    const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
+    const adapter = new TigrisAdapter(http, noop)
+    const parent = { kind: 's3' as const, providerRef: { bucket: 'firth-app-parent', endpoint: 'https://t3.storage.dev', region: 'auto' } }
+    await expect(adapter.forkBucket(parent, 'feature')).rejects.toThrow(/tigris fork PUT .* failed: 403/)
+  })
 })
 
 describe('TigrisAdapter.mintCredentials', () => {

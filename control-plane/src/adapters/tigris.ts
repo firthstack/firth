@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import type { ProviderAdapter, ResourceHandle, SecretBundle, UsageSnapshot } from './types.js'
+import type { ProviderAdapter, ResourceHandle, SecretBundle, StorageAdapter, UsageSnapshot } from './types.js'
 import type { SignedHttp } from './signed-http.js'
 
 const S3_ENDPOINT = 'https://t3.storage.dev'
@@ -12,6 +12,7 @@ export type TigrisRef = {
   region: string
   accessKeyId?: string
   policyArn?: string
+  snapshotEnabled?: boolean
 }
 export type TigrisOptions = { s3Endpoint?: string; iamEndpoint?: string; region?: string }
 
@@ -25,9 +26,9 @@ function xmlField(text: string, tag: string): string | undefined {
   return text.match(new RegExp(`<${tag}>([^<]+)</${tag}>`))?.[1]
 }
 
-export class TigrisAdapter implements ProviderAdapter {
+export class TigrisAdapter implements StorageAdapter {
   readonly kind = 's3' as const
-  readonly branchModel = 'shared' as const
+  readonly branchModel = 'fork' as const
   readonly s3Endpoint: string
   readonly iamEndpoint: string
   readonly region: string
@@ -55,10 +56,11 @@ export class TigrisAdapter implements ProviderAdapter {
 
   async provision(projectName: string): Promise<ResourceHandle> {
     const bucket = mkBucketName(projectName, randomBytes(4).toString('hex'))
-    // S3 CreateBucket = PUT to the bucket subresource (path-style against the Tigris endpoint).
-    const res = await this.s3(`${this.s3Endpoint}/${bucket}`, { method: 'PUT' })
+    // S3 CreateBucket = PUT to the bucket subresource. The Tigris header opts the bucket into
+    // snapshots at creation — required for it to be forkable later (cannot be retrofitted).
+    const res = await this.s3(`${this.s3Endpoint}/${bucket}`, { method: 'PUT', headers: { 'X-Tigris-Enable-Snapshot': 'true' } })
     if (res.status < 200 || res.status >= 300) throw new Error(`tigris PUT /${bucket} failed: ${res.status}`)
-    const providerRef: TigrisRef = { bucket, endpoint: this.s3Endpoint, region: this.region }
+    const providerRef: TigrisRef = { bucket, endpoint: this.s3Endpoint, region: this.region, snapshotEnabled: true }
     return { kind: 's3', providerRef }
   }
 
@@ -148,7 +150,22 @@ export class TigrisAdapter implements ProviderAdapter {
 
   async createBranch(_handle: ResourceHandle, _name: string, _parentRef?: string): Promise<string | null> { return null }
 
-  async deleteBranch(): Promise<void> { /* no per-branch resource: storage shared, compute redeploys */ }
+  async deleteBranch(): Promise<void> { /* fork buckets are torn down via destroy() on the branch's s3 resource */ }
+
+  async forkBucket(parent: ResourceHandle, name: string): Promise<ResourceHandle> {
+    const parentRef = parent.providerRef as TigrisRef
+    const bucket = mkBucketName(name, randomBytes(4).toString('hex'))
+    // CoW fork: CreateBucket with the fork-source header. Enable snapshots on the fork too so it
+    // can itself be forked (grandchild branches). No snapshot version → Tigris snapshots the
+    // source at fork time ("fork from now").
+    const res = await this.s3(`${this.s3Endpoint}/${bucket}`, {
+      method: 'PUT',
+      headers: { 'X-Tigris-Enable-Snapshot': 'true', 'X-Tigris-Fork-Source-Bucket': parentRef.bucket },
+    })
+    if (res.status < 200 || res.status >= 300) throw new Error(`tigris fork PUT /${bucket} failed: ${res.status}`)
+    const providerRef: TigrisRef = { bucket, endpoint: this.s3Endpoint, region: this.region, snapshotEnabled: true }
+    return { kind: 's3', providerRef }
+  }
 
   async mintCredentials(handle: ResourceHandle): Promise<SecretBundle> {
     const ref = handle.providerRef as TigrisRef
