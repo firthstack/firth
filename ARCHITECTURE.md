@@ -77,7 +77,7 @@ The three providers must present one shape so orchestration is uniform:
 ```ts
 interface ProviderAdapter {
   kind: 'neon' | 's3' | 'fly'
-  branchModel: 'native' | 'shared' | 'redeploy'
+  branchModel: 'native' | 'shared' | 'redeploy' | 'fork'
   provision(projectId): ResourceHandle              // create the base resource
   destroy(handle): void                             // for compensating rollback
   createBranch(handle, name, parentRef?): BranchRef | null   // neon=native; s3/fly=null

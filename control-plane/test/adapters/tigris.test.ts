@@ -81,7 +81,7 @@ describe('TigrisAdapter provision/destroy', () => {
     await expect(adapter.provision('x')).rejects.toThrow(/tigris PUT .* failed: 403/)
   })
 
-  test('createBranch returns null (shared bucket)', async () => {
+  test('createBranch returns null (fork model; per-branch teardown via destroy)', async () => {
     const noop = (async () => ({ status: 200, json: async () => ({}), text: async () => '' })) as SignedHttp
     const adapter = new TigrisAdapter(noop, noop)
     expect(await adapter.createBranch({ kind: 's3', providerRef: {} }, 'b')).toBeNull()
