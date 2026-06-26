@@ -147,6 +147,24 @@ test('deleteBranch destroys the branch fly app + neon branch and marks the fly r
   expect(db.tables.resources.find((r: any) => r.id === 'r-fly').status).toBe('destroyed')
 })
 
+test('deleteBranch destroys the branch fork bucket + neon branch and marks the s3 resource destroyed', async () => {
+  const s3Destroyed: string[] = []; const neonDeleted: string[] = []
+  const db = fakeData()
+  db.tables.projects.push({ id: 'p', owner: 'o', name: 'proj', status: 'active' })
+  db.tables.branches.push({ id: 'b-feat', owner: 'o', project_id: 'p', name: 'feature', is_default: false, neon_branch_ref: 'br-feat', status: 'active' })
+  db.tables.resources.push({ id: 'r-neon', owner: 'o', project_id: 'p', kind: 'neon', branch_id: null, provider_ref: { neonProjectId: 'np' }, status: 'active' })
+  db.tables.resources.push({ id: 'r-s3-root', owner: 'o', project_id: 'p', kind: 's3', branch_id: null, provider_ref: { bucket: 'root' }, status: 'active' })
+  db.tables.resources.push({ id: 'r-s3-feat', owner: 'o', project_id: 'p', kind: 's3', branch_id: 'b-feat', provider_ref: { bucket: 'firth-feature-fork' }, status: 'active' })
+  const neon = neonAdapter({ async deleteBranch(_h: any, ref: string) { neonDeleted.push(ref) } } as any)
+  const s3 = { kind: 's3', branchModel: 'fork', async provision() { return { kind: 's3', providerRef: {} } }, async destroy(h: any) { s3Destroyed.push((h.providerRef as any).bucket) }, async createBranch() { return null }, async deleteBranch() {}, async mintCredentials() { return {} }, async readUsage() { return {} } }
+  const out = await new TeardownService(db as any, cfg, [neon, s3 as any]).deleteBranch('o', 'p', 'b-feat')
+  expect(neonDeleted).toEqual(['br-feat'])
+  expect(s3Destroyed).toEqual(['firth-feature-fork'])  // only the branch fork, NOT the root bucket
+  expect(out.teardown.destroyed).toContain('s3')
+  expect(db.tables.resources.find((r: any) => r.id === 'r-s3-feat').status).toBe('destroyed')
+  expect(db.tables.resources.find((r: any) => r.id === 'r-s3-root').status).toBe('active')  // root untouched
+})
+
 test('deleteProject destroys every branch\'s fly app and skips an already-destroyed one', async () => {
   const flyDestroyed: string[] = []
   const db = fakeData()

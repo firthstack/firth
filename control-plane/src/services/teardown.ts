@@ -57,6 +57,17 @@ export class TeardownService {
         summary.failed.push({ kind: 'fly', message: e instanceof Error ? e.message : String(e) })
       }
     }
+    const s3 = this.adapters.find((a) => a.kind === 's3')
+    const s3Resource = await new ResourcesRepo(this.db).findByKindForBranch(owner, projectId, branchId, 's3')
+    if (s3 && s3Resource) {
+      try {
+        await s3.destroy({ kind: 's3', providerRef: s3Resource.provider_ref })
+        await new ResourcesRepo(this.db).markStatus(owner, s3Resource.id, 'destroyed')
+        summary.destroyed.push('s3')
+      } catch (e) {
+        summary.failed.push({ kind: 's3', message: e instanceof Error ? e.message : String(e) })
+      }
+    }
     await branches.archive(owner, branchId)
     return { branch: { ...branch, status: 'deleted' }, teardown: summary }
   }
