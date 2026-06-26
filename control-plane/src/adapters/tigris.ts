@@ -102,6 +102,11 @@ export class TigrisAdapter implements StorageAdapter {
     try {
       let keyMarker: string | undefined
       let versionIdMarker: string | undefined
+      // Fix B: drive pagination on IsTruncated, not on marker presence.
+      // A truncated response may theoretically lack a NextKeyMarker (e.g. list-of-versions with
+      // only DeleteMarkers on the last key), so relying solely on marker presence could silently
+      // drop pages. Parse the IsTruncated element and set markers only when truncated.
+      let truncated = true
       do {
         let listUrl = `${this.s3Endpoint}/${bucket}?versions`
         if (keyMarker) listUrl += `&key-marker=${encodeURIComponent(keyMarker)}`
@@ -125,21 +130,23 @@ export class TigrisAdapter implements StorageAdapter {
           const encodedKey = key.split('/').map(encodeURIComponent).join('/')
           const delUrl = `${this.s3Endpoint}/${bucket}/${encodedKey}?versionId=${encodeURIComponent(versionId)}`
           const delRes = await this.s3(delUrl, { method: 'DELETE' })
+          // Fix A: HTTP 400 on a per-version DELETE means this is an inherited CoW version from a
+          // parent bucket — the fork can list it but cannot delete it by versionId. Crucially, an
+          // inherited version does NOT block bucket deletion (DELETE /{bucket} succeeds regardless).
+          // Skip it silently; any other non-2xx (e.g. 403, 500) is a genuine failure.
+          if (delRes.status === 400) continue
           if (delRes.status < 200 || delRes.status >= 300) {
-            throw new Error(`tigris DELETE /${bucket}/${encodedKey}?versionId=... failed: ${delRes.status}`)
+            errors.push(new Error(`tigris DELETE /${bucket}/${encodedKey}?versionId=... failed: ${delRes.status}`))
           }
         }
 
-        // Paginate while truncated
-        const truncated = /<IsTruncated>true<\/IsTruncated>/.test(listXml)
+        // Fix B: parse IsTruncated to decide whether to fetch the next page
+        truncated = /<IsTruncated>true<\/IsTruncated>/.test(listXml)
         if (truncated) {
           keyMarker = listXml.match(/<NextKeyMarker>([^<]+)<\/NextKeyMarker>/)?.[1]
           versionIdMarker = listXml.match(/<NextVersionIdMarker>([^<]+)<\/NextVersionIdMarker>/)?.[1]
-        } else {
-          keyMarker = undefined
-          versionIdMarker = undefined
         }
-      } while (keyMarker !== undefined)
+      } while (truncated)
     } catch (e) {
       errors.push(e as Error)
     }
